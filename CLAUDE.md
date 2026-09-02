@@ -1,6 +1,6 @@
-# AGENTS.md — dsh-memory-archive 协同治理入口
+# AGENTS.md — dsh-managing-memory 技能开发工作区（治理入口）
 
-> dsh-memory-archive：DSH 会话归档检测的插件化改造开发项目（引擎 archive-lib/check/mark/timer + 治理技能 + 可选 DSH 插件）
+> dsh-managing-memory：DSH 文件式长期记忆技能的开发工作区——记忆引擎（MEMORY/USER/AGENT 索引 + notes + scripts 工具）+ 会话归档检测改造（方案 B：archive-lib/check/mark/timer）
 
 ## 开工前必读
 - **项目地图** → `docs/map/index.md`（LLM 友好导航：先读摘要，再按指针下钻，禁止全项目扫描）

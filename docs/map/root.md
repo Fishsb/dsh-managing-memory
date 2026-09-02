@@ -1,4 +1,4 @@
-# 模块总览 · dsh-memory-archive
+# 模块总览 · dsh-managing-memory
 
 > 模块级职责/影响面。**相关模块 = 跨模块影响面**：改一个模块前必须检查其相关模块。
 > 本表由 sync 从 root/<模块>.md 自动汇总（【模块表】标记之间请勿手改）；候选可由 `sync --links` 探测。

@@ -1,4 +1,4 @@
-# notes/INDEX.md — 测试骨架注册表（dsh-memory-archive 开发夹具）
+# notes/INDEX.md — 测试骨架注册表（dsh-managing-memory 开发夹具）
 
 | 子文档 | 内容 |
 |--------|------|

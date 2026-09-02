@@ -1,6 +1,6 @@
 # Changelog
 
-> dsh-memory-archive 更新日志。基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
+> dsh-managing-memory 更新日志。基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 ## [Unreleased]
 

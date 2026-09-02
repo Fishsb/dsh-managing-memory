@@ -1,6 +1,6 @@
-# 项目地图 · dsh-memory-archive
+# 项目地图 · dsh-managing-memory
 
-> dsh-memory-archive：DSH 会话归档检测引擎与插件化改造。单一事实源=scripts/*.mjs（archive-lib/check/mark/timer），SKILL §9/§10 协议与治理文档见根。。本文件是 LLM 友好导航（llms.txt 式）：先读这一句 + 导航，细节按链接按需取。
+> dsh-managing-memory：DSH 会话归档检测引擎与插件化改造。单一事实源=scripts/*.mjs（archive-lib/check/mark/timer），SKILL §9/§10 协议与治理文档见根。。本文件是 LLM 友好导航（llms.txt 式）：先读这一句 + 导航，细节按链接按需取。
 
 ## 导航
 

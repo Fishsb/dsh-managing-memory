@@ -30,7 +30,7 @@
 | `archive-timer.mjs`（新增） | `--due`（fireAt 到点 → 机械召回 → 落 `audit/archive-pending/<sid>.json` → 置 pending/清 fireAt=**唤醒后清理**）；`--watch` 周期常驻；`--status`；`--pending-list` | done+新行 → 数据驱动自动重新计时（重启重计时兜底）；资格门控行数≥50 |
 | `SKILL.md §9/§10` | 协议改方案 B：每轮 turn 后 `--touch`；`--due`/`--pending-list` 处理；队列裁决 fork archive-review 子代理（四裁决）；插件层说明 | 存储约束不变 |
 
-## 3. 插件层设计（新增 `@dsh-external/dsh-memory-archive`）
+## 3. 插件层设计（新增 `@dsh-external/dsh-managing-memory`）
 
 - **形态**：hybrid（daemon-loop + toolkit），复用 `dev_scaffold_plugin` → 无 checkout 时手写 `lib/index.js`（与 `src/index.ts` 对应）→ junction 依赖（cordis/schemastery/@deepseek-ai/dsh-tools，复用治理插件坑台账）→ `dev_inject_plugin`。
 - **daemon-loop（宿主常驻唤醒）**：单 tick（默认 60s）调 `archive-timer --due` —— 解决"谁定时唤醒"（本会话事故根因：无常驻执行者）；生命周期随宿主，免手动启动。
@@ -49,7 +49,7 @@
 1. 引擎：`archive-lib`（新）+ `archive-check`（改）+ `archive-mark`（改）+ `archive-timer`（新）+ `SKILL.md`（§9/§10）
 2. 测试：`scripts/test.mjs`（+5 断言：touch/due/不重触发/done+新行/--json/env）
 3. 文档：设计文档 v2 + `CHANGELOG.md`
-4. 插件包：`C:\Users\lk\.dsh\plugins\dsh-memory-archive\`（package.json/src/lib/build.sh/README/AGENTS）+ 注入验证
+4. 插件包：`C:\Users\lk\.dsh\plugins\dsh-managing-memory\`（package.json/src/lib/build.sh/README/AGENTS）+ 注入验证
 
 ## 5. 测试与回归策略
 
