@@ -3,11 +3,13 @@
 # ---- project-map-governance（瞬态数据，不入库）----
 .internal/
 
-# ---- 个人记忆/技能运行时副本（开发参考，不入库）----
+# ---- 个人记忆（开发参考副本，不入库）----
 /MEMORY.md
 /USER.md
 /AGENT.md
-/notes/
-/audit/
-/pending/
+
+# ---- audit 运行时产物（保留 .gitkeep 占位）----
+/audit/*
+!/audit/.gitkeep
+
 node_modules/

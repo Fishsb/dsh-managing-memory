@@ -4,6 +4,9 @@
 
 ## 导航
 
+- `audit` — 见 root/audit.md（职责待填）
+- `notes` — 见 root/notes.md（职责待填）
+- `pending` — 见 root/pending.md（职责待填）
 - `scripts` — 见 root/scripts.md（职责待填）
 
 ## 治理
