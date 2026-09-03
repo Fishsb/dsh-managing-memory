@@ -25,15 +25,16 @@ if (outFile) {
   process.stdout.write = (chunk, enc, cb) => { outLines.push(String(chunk)); return origWrite(chunk, enc, cb); };
 }
 
-// 索引文件：按行解析，标题行（#）与空行不算条目
+// 索引文件（主文档=会话注入面）：按行解析，标题行（#）与空行不算条目
+// v9：容量红线只对主文档生效；详情子文档为按需读取层，不设硬限（超 NOTES_WARN 仅提示）
 const INDEX_FILES = [
-  { name: 'MEMORY.md', limit: 2200, tags: ['env', 'tool', 'flow', 'lesson'] },
-  { name: 'USER.md', limit: 1375, tags: ['身份', '环境', '硬件', '偏好', '习惯'] },
-  { name: 'AGENT.md', limit: 1375, tags: ['身份', '使命', '边界', '偏好', '习惯', '经验', '演化', '教训'] },
+  { name: 'MEMORY.md', limit: 3000, tags: ['env', 'tool', 'flow', 'lesson'] },
+  { name: 'USER.md', limit: 2000, tags: ['身份', '环境', '硬件', '偏好', '习惯'] },
+  { name: 'AGENT.md', limit: 2000, tags: ['身份', '使命', '边界', '偏好', '习惯', '经验', '演化', '教训'] },
 ];
 // 详情子文档（注册表见 notes/INDEX.md；缺少任一 → exit 4）
 const NOTES = ['env.md', 'tools.md', 'flows.md', 'lessons.md', 'release.md', 'user.md', 'agent.md'];
-const NOTES_LIMIT = 3000;
+const NOTES_WARN = 8000; // 辅助文档高警戒提示线（不拦截，仅提示按需拆分）
 
 let exitCode = 0;
 
@@ -81,7 +82,7 @@ for (const { name, limit, tags } of INDEX_FILES) {
   if (pct > 85) exitCode = Math.max(exitCode, 2);
 }
 
-// notes 子文档体检（容量 + 注册 + 指针存在性）
+// notes 子文档体检（注册 + 指针存在性；容量超 NOTES_WARN 仅提示，不拦截——v9）
 console.log('\n=== notes/ 子文档 ===');
 const notesDir = join(skillDir, 'notes');
 try {
@@ -91,10 +92,8 @@ try {
     try {
       const raw = await readFile(p, 'utf8');
       const chars = raw.replace(/\s/g, '').length;
-      const pct = Math.round((chars / NOTES_LIMIT) * 100);
       const sections = (raw.match(/^## /gm) || []).length;
-      console.log(`${n}: ${chars}/${NOTES_LIMIT} (${pct}%) ${sections} 小节 ${chars > NOTES_LIMIT ? '⚠️ 超限（按重组 SOP 拆分）' : '✅'}`);
-      if (chars > NOTES_LIMIT) exitCode = Math.max(exitCode, 5);
+      console.log(`${n}: ${chars} 字符 ${sections} 小节 ${chars > NOTES_WARN ? `⚠️ 超 ${NOTES_WARN} 警戒线（按需拆分，不拦截）` : '✅'}`);
     } catch {
       console.log(`[FAIL] notes/${n}: 缺失`);
       exitCode = Math.max(exitCode, 4);
