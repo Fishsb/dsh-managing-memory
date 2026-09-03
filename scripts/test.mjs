@@ -126,5 +126,110 @@ try {
   fs.rmSync(t5, { recursive: true, force: true });
 } catch { fail++; console.log('❌ archive-check-增量（异常）'); }
 
+// ===== 方案 B：定时唤醒归档检测（T14-T18；临时容器 + env 隔离，真实 audit/pending 不触碰）=====
+const realLog = path.join(skillDir, 'audit', 'archive-progress.jsonl');
+const realPendDir = path.join(skillDir, 'audit', 'archive-pending');
+const REAL_LOG_BEFORE = fs.existsSync(realLog) ? fs.readFileSync(realLog, 'utf8') : '';
+const REAL_PEND_BEFORE = fs.existsSync(realPendDir) ? fs.readdirSync(realPendDir).length : 0;
+const failMsg = (e) => String((e && (e.message || e.stderr)) || e).split('\n').filter((l) => l.trim() && !/inspector/.test(l)).slice(0, 3).join(' | ').slice(0, 200);
+
+// 14) touch/due 状态机：touch 重计时 → due 到点触发落队列 → pending/fireAt 清理 → 幂等不重触发
+try {
+  const t6 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t6-'));
+  fs.cpSync(skillDir, t6, { recursive: true });
+  const sess = path.join(t6, 'sessions', 'sess-x');
+  fs.mkdirSync(sess, { recursive: true });
+  fs.writeFileSync(path.join(sess, 'session.jsonl'), Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t6, 'sessions'), ARCHIVE_LOG: path.join(t6, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t6, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(t6, 'scripts', f), ...a], { encoding: 'utf8', env }));
+  jx('archive-mark.mjs', ['sess-x', '--touch', '--lastRow', '0', '--json']);
+  const st1 = jx('archive-timer.mjs', ['--status', '--json']);
+  execFileSync('node', [path.join(t6, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env });
+  const st2 = jx('archive-timer.mjs', ['--status', '--json']);
+  const q = JSON.parse(fs.readFileSync(path.join(t6, 'audit', 'archive-pending', 'sess-x.json'), 'utf8'));
+  const due2 = jx('archive-timer.mjs', ['--due', '--json']);
+  const okB = st1[0]?.fireAt > 0 && st1[0]?.pending === false
+    && st2[0]?.pending === true && st2[0]?.fireAt === null
+    && q.delta === 60 && Array.isArray(q.signals)
+    && due2.count === 0;
+  if (okB) pass++; else fail++;
+  console.log(`${okB ? '✅' : '❌'} 方案B-touch/due（fireAt→fired→pending/幂等不重触发）`);
+  fs.rmSync(t6, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-touch/due（异常: ' + failMsg(e) + '）'); }
+
+// 15) 资格门控：行数不足 → rearm 不入队；资格达标后 → fired
+try {
+  const t7 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t7-'));
+  fs.cpSync(skillDir, t7, { recursive: true });
+  const sess = path.join(t7, 'sessions', 'sess-y');
+  fs.mkdirSync(sess, { recursive: true });
+  fs.writeFileSync(path.join(sess, 'session.jsonl'), Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t7, 'sessions'), ARCHIVE_LOG: path.join(t7, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t7, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  const jx = (f, a, e2 = env) => JSON.parse(execFileSync('node', [path.join(t7, 'scripts', f), ...a], { encoding: 'utf8', env: e2 }));
+  jx('archive-mark.mjs', ['sess-y', '--touch', '--lastRow', '0', '--json']);
+  execFileSync('node', [path.join(t7, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env }); // MIN_LINES=50 → rearm
+  const st1 = jx('archive-timer.mjs', ['--status', '--json']);
+  const noQueue = !fs.existsSync(path.join(t7, 'audit', 'archive-pending', 'sess-y.json'));
+  const env2 = { ...env, ARCHIVE_MIN_LINES: '10' }; // 资格达标（10≥10）→ fired
+  execFileSync('node', [path.join(t7, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env: env2 });
+  const st2 = jx('archive-timer.mjs', ['--status', '--json']);
+  const okG = st1[0]?.fireAt != null && noQueue && st2[0]?.pending === true;
+  if (okG) pass++; else fail++;
+  console.log(`${okG ? '✅' : '❌'} 方案B-资格门控（不足 rearm 不入队/达标 fired）`);
+  fs.rmSync(t7, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-资格门控（异常: ' + failMsg(e) + '）'); }
+
+// 16) done+新行：done 态出现新行 → touch 重武装（数据驱动失效）→ due fired（队列带 done 标记）
+try {
+  const t8 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t8-'));
+  fs.cpSync(skillDir, t8, { recursive: true });
+  const sess = path.join(t8, 'sessions', 'sess-z');
+  fs.mkdirSync(sess, { recursive: true });
+  const sessFile = path.join(sess, 'session.jsonl');
+  fs.writeFileSync(sessFile, Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t8, 'sessions'), ARCHIVE_LOG: path.join(t8, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t8, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(t8, 'scripts', f), ...a], { encoding: 'utf8', env }));
+  execFileSync('node', [path.join(t8, 'scripts', 'archive-mark.mjs'), 'sess-z', '60', '--total', '60', '--done'], { env, stdio: 'ignore' });
+  const runC = (a) => { try { return { code: 0, out: execFileSync('node', [path.join(t8, 'scripts', 'archive-check.mjs'), ...a], { encoding: 'utf8', env }) }; } catch (e) { return { code: e.status, out: e.stdout || '' }; } };
+  const c1 = JSON.parse(runC(['sess-z', '--json']).out); // done 无增量：check 按契约 exit 2，消费其 JSON
+  fs.appendFileSync(sessFile, Array.from({ length: 10 }, (_, i) => `l${i + 61}`).join('\n') + '\n');
+  const c2r = runC(['sess-z', '--json']);
+  const c2 = JSON.parse(c2r.out);
+  jx('archive-mark.mjs', ['sess-z', '--touch', '--lastRow', '60', '--json']);
+  execFileSync('node', [path.join(t8, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env });
+  const q = JSON.parse(fs.readFileSync(path.join(t8, 'audit', 'archive-pending', 'sess-z.json'), 'utf8'));
+  const okD = c2r.code === 0 && c1.done === true && c1.hasDelta === false
+    && c2.hasDelta === true && c2.delta.count === 10
+    && q.delta === 10 && q.done === true;
+  if (okD) pass++; else fail++;
+  console.log(`${okD ? '✅' : '❌'} 方案B-done+新行（数据失效/touch 重武装/队列带 done）`);
+  fs.rmSync(t8, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-done+新行（异常: ' + failMsg(e) + '）'); }
+
+// 17) --json 结构化：check --json --sig 字段契约（sessionId/total/lastRow/hasDelta/delta/signals）
+try {
+  const t9 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t9-'));
+  fs.cpSync(skillDir, t9, { recursive: true });
+  const src = path.join(t9, 'tmp-transcript.txt');
+  fs.writeFileSync(src, 'l1\n记住这个坑：用前端封装\nl3\nl4\nl5\n');
+  execFileSync('node', [path.join(t9, 'scripts', 'archive-mark.mjs'), src, '1'], { cwd: t9, stdio: 'ignore' });
+  const c = JSON.parse(execFileSync('node', [path.join(t9, 'scripts', 'archive-check.mjs'), src, '--json', '--sig'], { encoding: 'utf8', cwd: t9 }));
+  const okJ = c.total === 5 && c.lastRow === 1 && c.hasDelta === true
+    && c.delta.from === 2 && c.delta.to === 5 && c.delta.count === 4
+    && Array.isArray(c.signals) && c.signals.length >= 1;
+  if (okJ) pass++; else fail++;
+  console.log(`${okJ ? '✅' : '❌'} 方案B-check--json（字段契约+增量内信号）`);
+  fs.rmSync(t9, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-check--json（异常: ' + failMsg(e) + '）'); }
+
+// 18) env 隔离：容器跑完后真实 audit 未被写入（日志逐字节一致 + pending 队列零新增）
+{
+  const logAfter = fs.existsSync(realLog) ? fs.readFileSync(realLog, 'utf8') : '';
+  const pendAfter = fs.existsSync(realPendDir) ? fs.readdirSync(realPendDir).length : 0;
+  const okI = logAfter === REAL_LOG_BEFORE && pendAfter === REAL_PEND_BEFORE;
+  if (okI) pass++; else fail++;
+  console.log(`${okI ? '✅' : '❌'} 方案B-env隔离（真实 audit 未写入：log ${REAL_LOG_BEFORE.length === logAfter.length ? '一致' : '✗'} / pending ${REAL_PEND_BEFORE}→${pendAfter}）`);
+}
+
 console.log(`\n结果: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

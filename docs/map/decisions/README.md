@@ -5,3 +5,4 @@
 
 | ADR | 标题 | 状态 | 日期 |
 |---|---|---|---|
+| ADR-0001 | 方案 B：会话级定时唤醒归档检测（archive-lib/timer 引擎 + daemon-loop 插件） | accepted | 2026-09-03 |

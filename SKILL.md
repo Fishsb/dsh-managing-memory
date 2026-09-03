@@ -74,20 +74,21 @@ Research & Execution Agent：检索、分析、诊断、建议、交付；代码
 
 **任务收尾判定（需"实际完成"证据，任一）**：① 交付纪律③"交付即停"完成（逐条 ✅/❌、无待办、无自动延续）；② goal 达成（`update_goal complete`）。**③ 新会话/新任务不是完成证据，只是检查时机**——开启新会话时：若上一任务已按①②实际完成 → 补触发收尾清单；若上一任务未完成/中断（无交付输出）→ **不触发收尾清单、不伪造完成**，仅轻量 health 检查兜底。**频率边界**：非每 turn 收尾，而是"一次指令→多轮工具→最终交付"的大循环结束。**例外**：纯咨询/问答（单轮事实回答、无可沉淀动作）可轻量执行或跳过。
 
-**记忆收尾清单（必作，随交付纪律③/任务收尾判定触发）**：交付/任务收尾前按三步执行，防漏记：
+**记忆收尾清单（必作，随交付纪律③/任务收尾判定触发）**：交付/任务收尾前按四步执行，防漏记：
 ① 候选召回 → `node scripts\candidate_grep.mjs`（信号词扫描本次会话明文记录，纯召回不写库）
 ② 四问初筛 → 逐候选实际核对 Q0/Q1/Q2/Q3，注明每项理由
 ③ 落点 → 通过写入 `pending\`（含拟标签与日期）；拒绝在交付说明中给出丢弃理由
+④ 触点重计时 → `node scripts\archive-mark.mjs <当前会话id> --touch`（会话活跃证据，防静默误唤醒）
 
 **完整性自检与恢复**：health 覆盖缺失(4)/重复(3)/指针·格式(5)/超限(2)；异常→按重组 7 步修复，局部损坏用 `dist\`/CHANGELOG 复原，无法自愈保留现场如实上报（零容忍）。
 
-### 10. 会话归档检测（静默+增量，参照守藏 idle-review）
+### 10. 会话归档检测（方案 B：会话级定时唤醒，ADR-0001）
 
-- **触发 = 三惰性检测点**（**零每会话 Timer，防膨胀**）：① 会话初始加载时扫历史 ② 任务收尾（并入收尾清单）③ 手动 `node scripts\archive-check.mjs <sessionId>`；如需自动性用单个全局低频率调度（O(1) 非 O(N)）
-- **静默判定**：`TS_SILENT=780s`，从最后 turn/end 起算；窗口内新 turn 重排；资格门控 turn≥3 且行数≥50；活跃/自动化会话天然不触发
-- **增量检测**：`audit\archive-progress.jsonl` 记 `{sessionId,lastRow,total,done,at}`（sessionId 关联键，upsert 每会话仅一条）；转录=zstd jsonl（append-only），仅分析 `(lastRow, total]` 新增行；**重启再触发=数据驱动**（total>lastRow 使 done 失效，与计时器无关）；触发完成→mark done=true
-- **流程（fork 子代理）**：`archive-check --sig` 增量行+信号召回 → 四裁决（ADD 新候选→`pending\` / NOOP 重复跳过 / MERGE 并入同主题 / SUPERSEDE 备注丢弃）→ `archive-mark <sessionId> <lastRow> [--total N] [--done]` → 汇报裁决表
-- **存储约束**：进度日志在 `audit\`（非记忆、health 不扫、不计容量）；候选只落 `pending\`；**绝不直接写 MEMORY/USER/AGENT/notes**；固化仍走审计四问+write_gate
+- **触发 = 定时唤醒**（每会话独立 idle 计时器）：每轮 turn 后 `node scripts\archive-mark.mjs <sessionId> --touch`（重计时，活跃会话不误触发）；到点由**宿主常驻执行者**唤醒——daemon-loop 插件每 tick 跑 `archive-timer --due`，无插件环境可 `--watch [ms]` 常驻或手动 `--due`（O(1) 扫描，非每会话 Timer）
+- **唤醒语义**：fireAt 到点 → `--due`：资格门控（行数≥50，`ARCHIVE_MIN_LINES` 可调）→ 机械信号召回 → 落 `audit\archive-pending\<sid>.json` 队列 → pending=true/fireAt=null（**唤醒后清理**）；静默阈值 `TS_SILENT=780s`（`ARCHIVE_SILENT_MS` 可调）
+- **状态与幂等**：mark 行 `{sessionId,lastRow,total,done,pending,lastTurnAt,fireAt,at}`；已入队不重触发；重启重计时兜底（fireAt 仅 touch/裁决后存在）；done+新行 → touch 重武装（数据驱动失效）；`archive-timer --status [--json]` 看全景
+- **裁决流程（fork 子代理）**：`archive-timer --pending-list` 取队列 → `archive-check <sid> --json --sig` 增量+信号 → 四裁决（ADD 新候选→`pending\` / NOOP 重复跳过 / MERGE 并入同主题 / SUPERSEDE 备注丢弃）→ `archive-mark <sid> <lastRow> --done` → `archive-timer --dequeue <sid>` 清队 → 汇报裁决表
+- **存储约束**：进度与队列在 `audit\`（非记忆、health 不扫、不计容量）；候选只落 `pending\`；**绝不直接写 MEMORY/USER/AGENT/notes**；固化仍走审计四问+write_gate；env（`ARCHIVE_LOG/PENDING/SESSIONS/SILENT_MS`）仅供插件与测试容器隔离
 
 ## 🧠 L3 速查（按需查阅）
 

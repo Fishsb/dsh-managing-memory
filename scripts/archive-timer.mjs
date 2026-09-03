@@ -1,0 +1,113 @@
+#!/usr/bin/env node
+// archive-timer.mjs — 方案 B 唤醒执行器（到点归档检测 → 落 pending 队列 → 唤醒后清理）
+// 用法:
+//   node scripts/archive-timer.mjs --due            # 扫描 mark：fireAt 到点 → 门控 → 机械召回 → 落 audit/archive-pending/<sid>.json → pending=true/fireAt=null
+//   node scripts/archive-timer.mjs --watch [ms]     # 周期常驻执行 --due（缺省 60s；插件 daemon-loop 每 tick 调 --due，本模式供 CLI 独立跑）
+//   node scripts/archive-timer.mjs --status [--json]
+//   node scripts/archive-timer.mjs --pending-list [--json]   # pending 队列清单（裁决入口）
+//   node scripts/archive-timer.mjs --dequeue <sessionId>     # 裁决完成后清理该会话队列文件（与 --pending-list 配对）
+// env: ARCHIVE_LOG / ARCHIVE_PENDING / ARCHIVE_SESSIONS / ARCHIVE_SILENT_MS / ARCHIVE_MIN_LINES（资格门控，缺省 50）
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import * as lib from './archive-lib.mjs';
+
+const argv = process.argv.slice(2);
+const wantJson = argv.includes('--json');
+const mode = argv.includes('--due') ? 'due' : argv.includes('--watch') ? 'watch' : argv.includes('--status') ? 'status' : argv.includes('--pending-list') ? 'plist' : argv.includes('--dequeue') ? 'deq' : null;
+if (!mode) { console.error('用法: node scripts/archive-timer.mjs --due | --watch [ms] | --status [--json] | --pending-list [--json] | --dequeue <sessionId>'); process.exit(3); }
+
+const cfg = lib.pathConfig();
+const minLines = () => Number(process.env.ARCHIVE_MIN_LINES) || 50;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---- 核心扫描：fireAt 到点 → 触发/清理/重武装（幂等：已入队或已清理不再触发）----
+async function runDue() {
+  const marks = await lib.readMarks(cfg.log);
+  const now = Date.now();
+  const fired = [];
+  for (const m of marks) {
+    if (m.fireAt == null || m.fireAt > now) continue; // 未武装/未到点
+    const sid = m.sessionId;
+    if (m.pending && (await lib.readPending(sid, cfg.pendingDir))) continue; // 已入队待裁决（幂等）
+    const file = await lib.locateTranscript(sid);
+    if (!file) { fired.push({ sid, action: 'skip', reason: '转录未找到' }); continue; }
+    let text = '';
+    try { text = await lib.decodeTranscript(file); } catch (e) { fired.push({ sid, action: 'skip', reason: '解码失败: ' + e.message }); continue; }
+    const total = lib.countLines(text);
+    if (total <= m.lastRow) {
+      // 无增量：唤醒后清理 fireAt（防重复触发）；done 保持——数据驱动重武装
+      await lib.upsertMark({ ...m, fireAt: null });
+      fired.push({ sid, action: 'clear', reason: `无增量 (lastRow=${m.lastRow}, total=${total})` });
+      continue;
+    }
+    if (total < minLines()) {
+      // 资格不够：重新计时（窗口重来）
+      await lib.upsertMark({ ...m, fireAt: now + cfg.silentMs, at: new Date().toISOString() });
+      fired.push({ sid, action: 'rearm', reason: `行数 ${total} < ${minLines()}，重新计时` });
+      continue;
+    }
+    const signals = lib.recallSignals(text.split('\n').filter(Boolean), m.lastRow + 1);
+    const payload = { dueAt: new Date().toISOString(), lastRow: m.lastRow, total, delta: total - m.lastRow, done: !!m.done, signals, transcript: file };
+    await lib.writePending(sid, payload, cfg.pendingDir);
+    await lib.upsertMark({ ...m, pending: true, fireAt: null, at: new Date().toISOString() }); // 唤醒后清理
+    fired.push({ sid, action: 'fired', delta: payload.delta, signals: signals.length, queue: lib.pendingFileFor(sid, cfg.pendingDir) });
+  }
+  return fired;
+}
+
+if (mode === 'due') {
+  const fired = await runDue();
+  if (wantJson) console.log(JSON.stringify({ count: fired.length, fired }, null, 2));
+  else if (fired.length) fired.forEach((f) => console.log(`${f.action === 'fired' ? '⏰' : '·'} ${f.sid} ${f.action}${f.reason ? ' — ' + f.reason : ''}${f.action === 'fired' ? `（增量 ${f.delta} 行，信号 ${f.signals} 条 → ${f.queue}）` : ''}`));
+  else console.log('无到点会话');
+  process.exit(0);
+}
+
+if (mode === 'watch') {
+  const idx = argv.indexOf('--watch');
+  const interval = Number(argv[idx + 1]) || Number(process.env.ARCHIVE_WATCH_MS) || 60000;
+  console.log(`archive-timer --watch：每 ${interval}ms 扫描一次（Ctrl+C 退出）`);
+  for (;;) {
+    const fired = await runDue().catch((e) => [{ sid: '-', action: 'error', reason: e.message }]);
+    fired.forEach((f) => console.log(`[${new Date().toISOString()}] ${f.sid} ${f.action}${f.reason ? ' — ' + f.reason : ''}`));
+    await sleep(interval);
+  }
+}
+
+if (mode === 'status') {
+  const marks = await lib.readMarks(cfg.log);
+  const now = Date.now();
+  const rows = marks.map((m) => ({
+    sessionId: m.sessionId, lastRow: m.lastRow ?? 0, done: !!m.done, pending: !!m.pending,
+    fireAt: m.fireAt ?? null, dueInMs: m.fireAt != null ? Math.max(0, m.fireAt - now) : null,
+  }));
+  if (wantJson) console.log(JSON.stringify(rows, null, 2));
+  else {
+    console.log('sessionId | lastRow | done | pending | fireAt | 剩余');
+    for (const r of rows) console.log(`${r.sessionId} | ${r.lastRow} | ${r.done ? '✓' : '·'} | ${r.pending ? '📥' : '·'} | ${r.fireAt ? new Date(r.fireAt).toISOString() : '—'} | ${r.dueInMs != null ? Math.round(r.dueInMs / 1000) + 's' : '—'}`);
+    if (!rows.length) console.log('（无 mark）');
+  }
+  process.exit(0);
+}
+
+if (mode === 'deq') {
+  const sid = argv.filter((a) => !a.startsWith('--'))[0];
+  if (!sid) { console.error('用法: --dequeue <sessionId>'); process.exit(3); }
+  await lib.removePending(sid, cfg.pendingDir);
+  const m = await lib.findMark(sid);
+  if (m) await lib.upsertMark({ ...m, pending: false, at: new Date().toISOString() });
+  console.log(`dequeue ${lib.normalizeSid(sid)}: 队列文件已清理，mark pending 已复位`);
+  process.exit(0);
+}
+
+if (mode === 'plist') {
+  const files = await lib.listPending(cfg.pendingDir);
+  const rows = [];
+  for (const f of files) { try { rows.push(JSON.parse(await readFile(join(cfg.pendingDir, f), 'utf8'))); } catch { /* 坏行跳过 */ } }
+  if (wantJson) console.log(JSON.stringify(rows, null, 2));
+  else {
+    console.log(`pending 队列 ${rows.length} 条：`);
+    rows.forEach((r) => console.log(`- ${r.sessionId}（增量 ${r.delta} 行，信号 ${(r.signals || []).length} 条，due ${r.dueAt}）`));
+  }
+  process.exit(0);
+}
