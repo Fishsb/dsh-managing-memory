@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // archive-timer.mjs — 方案 B 唤醒执行器（到点归档检测 → 落 pending 队列 → 唤醒后清理）
 // 用法:
-//   node scripts/archive-timer.mjs --due            # 扫描 mark：fireAt 到点 → 门控 → 机械召回 → 落 audit/archive-pending/<sid>.json → pending=true/fireAt=null
+//   node scripts/archive-timer.mjs --due            # 发现静默未 mark 会话（自动建 mark）+ 扫描 mark：fireAt 到点 → 门控 → 机械召回 → 落 audit/archive-pending/<sid>.json → pending=true/fireAt=null
 //   node scripts/archive-timer.mjs --watch [ms]     # 周期常驻执行 --due（缺省 60s；插件 daemon-loop 每 tick 调 --due，本模式供 CLI 独立跑）
 //   node scripts/archive-timer.mjs --status [--json]
 //   node scripts/archive-timer.mjs --pending-list [--json]   # pending 队列清单（裁决入口）
 //   node scripts/archive-timer.mjs --dequeue <sessionId>     # 裁决完成后清理该会话队列文件（与 --pending-list 配对）
 // env: ARCHIVE_LOG / ARCHIVE_PENDING / ARCHIVE_SESSIONS / ARCHIVE_SILENT_MS / ARCHIVE_MIN_LINES（资格门控，缺省 50）
+//      ARCHIVE_DISCOVER=0 关闭发现步 / ARCHIVE_DISCOVER_BATCH 每 tick 发现上限（缺省 3，最旧优先）
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as lib from './archive-lib.mjs';
@@ -18,13 +19,29 @@ if (!mode) { console.error('用法: node scripts/archive-timer.mjs --due | --wat
 
 const cfg = lib.pathConfig();
 const minLines = () => Number(process.env.ARCHIVE_MIN_LINES) || 50;
+const discoverBatch = () => Number(process.env.ARCHIVE_DISCOVER_BATCH) || 3; // 每 tick 最多发现的未 mark 会话数（摊平成本）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---- 核心扫描：fireAt 到点 → 触发/清理/重武装（幂等：已入队或已清理不再触发）----
-async function runDue() {
-  const marks = await lib.readMarks(cfg.log);
+// ---- 发现步（补「无 mark 会话脱管」缺口）：静默超阈值的未 mark 会话 → 自动建 mark（下轮 tick 正常走门控/入队）----
+// 资格：转录 mtime 已静默超 silentMs；跳过 ARCHIVE_DISCOVER 空目录（测试/工具自检）
+async function discoverSessions(marks) {
+  if (String(process.env.ARCHIVE_DISCOVER) === '0') return [];
   const now = Date.now();
-  const fired = [];
+  const cands = (await lib.enumerateSessions(now - cfg.silentMs, marks)).slice(0, discoverBatch());
+  const discovered = [];
+  for (const c of cands) {
+    await lib.upsertMark({ sessionId: c.sessionId, lastRow: 0, done: false, pending: false, lastTurnAt: c.mtime, fireAt: now, at: new Date().toISOString() });
+    discovered.push({ sid: c.sessionId, action: 'discovered', reason: `无 mark 且已静默（mtime ${new Date(c.mtime).toISOString()}）→ 建 mark 立即到点` });
+  }
+  return discovered;
+}
+
+// ---- 核心扫描：发现 → fireAt 到点 → 触发/清理/重武装（幂等：已入队或已清理不再触发）----
+async function runDue() {
+  let marks = await lib.readMarks(cfg.log);
+  const fired = await discoverSessions(marks);
+  if (fired.length) marks = await lib.readMarks(cfg.log); // 发现新建了 mark → 重读，本轮即处理
+  const now = Date.now(); // 发现步之后采样：新建 mark 的 fireAt(=发现时刻) 必然 ≤ now，同轮即处理
   for (const m of marks) {
     if (m.fireAt == null || m.fireAt > now) continue; // 未武装/未到点
     const sid = m.sessionId;

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+- 会话发现机制（补脱管缺口）：`archive-timer --due` 增加发现步——静默超阈值且无 mark 的会话自动建 mark 入网（agent 忘 touch/工具型会话零协议成本），`ARCHIVE_DISCOVER=0` 可关、`ARCHIVE_DISCOVER_BATCH` 限批最旧优先；同毫秒竞态修复（now 在发现步后采样）；测试 18→19 用例全绿。真实环境验证：历史会话批量入网、本会话被发现路径覆盖。
+- 召回增强：JSONL 转录行提取对话正文匹配（extractUtterance），session/title·todo/write 等结构化状态行降噪不入召回；信号更准（todo 计划性内容不再误命中）。
+
 ### Fixed
 - 测试健壮性：方案 B 状态机断言改按 sessionId 取数（此前按数组位置，容器 log 含真实会话条目时错位——生产副本 16/2 假阴性根因）；双侧 18/18 复绿。
 - 治理完整性修复：index.md CHANGELOG 死链（`../`→`../../`，pre-commit 门禁自锁解除）、补齐 root/audit-notes-pending 三模块文档与 index 导航概况/root 派生表语义字段、tree 职责注记补全。

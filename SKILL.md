@@ -84,7 +84,7 @@ Research & Execution Agent：检索、分析、诊断、建议、交付；代码
 
 ### 10. 会话归档检测（方案 B：会话级定时唤醒，ADR-0001）
 
-- **触发 = 定时唤醒**（每会话独立 idle 计时器）：每轮 turn 后 `node scripts\archive-mark.mjs <sessionId> --touch`（重计时，活跃会话不误触发）；到点由**宿主常驻执行者**唤醒——daemon-loop 插件每 tick 跑 `archive-timer --due`，无插件环境可 `--watch [ms]` 常驻或手动 `--due`（O(1) 扫描，非每会话 Timer）
+- **触发 = 定时唤醒**（每会话独立 idle 计时器）：每轮 turn 后 `node scripts\archive-mark.mjs <sessionId> --touch`（重计时，活跃会话不误触发；**忘 touch 有发现步兜底**——daemon 把静默超阈值的未 mark 会话自动入网；但**活跃会话中途停 touch 会被误判静默**，恢复=touch 即复位 pending）；到点由**宿主常驻执行者**唤醒——daemon-loop 插件每 tick 跑 `archive-timer --due`，无插件环境可 `--watch [ms]` 常驻或手动 `--due`（O(1) 扫描，非每会话 Timer）
 - **唤醒语义**：fireAt 到点 → `--due`：资格门控（行数≥50，`ARCHIVE_MIN_LINES` 可调）→ 机械信号召回 → 落 `audit\archive-pending\<sid>.json` 队列 → pending=true/fireAt=null（**唤醒后清理**）；静默阈值 `TS_SILENT=780s`（`ARCHIVE_SILENT_MS` 可调）
 - **状态与幂等**：mark 行 `{sessionId,lastRow,total,done,pending,lastTurnAt,fireAt,at}`；已入队不重触发；重启重计时兜底（fireAt 仅 touch/裁决后存在）；done+新行 → touch 重武装（数据驱动失效）；`archive-timer --status [--json]` 看全景
 - **裁决流程（fork 子代理）**：`archive-timer --pending-list` 取队列 → `archive-check <sid> --json --sig` 增量+信号 → 四裁决（ADD 新候选→`pending\` / NOOP 重复跳过 / MERGE 并入同主题 / SUPERSEDE 备注丢弃）→ `archive-mark <sid> <lastRow> --done` → `archive-timer --dequeue <sid>` 清队 → 汇报裁决表

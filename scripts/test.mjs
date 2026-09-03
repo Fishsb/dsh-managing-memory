@@ -210,21 +210,47 @@ try {
   fs.rmSync(t8, { recursive: true, force: true });
 } catch (e) { fail++; console.log('❌ 方案B-done+新行（异常: ' + failMsg(e) + '）'); }
 
-// 17) --json 结构化：check --json --sig 字段契约（sessionId/total/lastRow/hasDelta/delta/signals）
+// 17) --json 结构化：check --json --sig 字段契约（增量内信号）+ 召回降噪（todo/title 元数据行不进召回）
 try {
   const t9 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t9-'));
   fs.cpSync(skillDir, t9, { recursive: true });
   const src = path.join(t9, 'tmp-transcript.txt');
-  fs.writeFileSync(src, 'l1\n记住这个坑：用前端封装\nl3\nl4\nl5\n');
+  const todoLine = JSON.stringify({ type: 'todo/write', seq: 1, data: { todos: [{ content: '方案B 决策 todo 内容' }] } });
+  const userLine = JSON.stringify({ type: 'user/message', seq: 2, data: { content: [{ type: 'text', text: '记住这个坑：用前端封装' }] } });
+  fs.writeFileSync(src, 'l1\n' + todoLine + '\n' + userLine + '\nl4\nl5\n');
   execFileSync('node', [path.join(t9, 'scripts', 'archive-mark.mjs'), src, '1'], { cwd: t9, stdio: 'ignore' });
   const c = JSON.parse(execFileSync('node', [path.join(t9, 'scripts', 'archive-check.mjs'), src, '--json', '--sig'], { encoding: 'utf8', cwd: t9 }));
+  const hitTexts = c.signals.map((s) => s.text).join('|');
   const okJ = c.total === 5 && c.lastRow === 1 && c.hasDelta === true
     && c.delta.from === 2 && c.delta.to === 5 && c.delta.count === 4
-    && Array.isArray(c.signals) && c.signals.length >= 1;
+    && Array.isArray(c.signals) && c.signals.length >= 1
+    && hitTexts.includes('记住这个坑') && !hitTexts.includes('todo'); // 用户正文命中；todo 元数据行降噪
   if (okJ) pass++; else fail++;
-  console.log(`${okJ ? '✅' : '❌'} 方案B-check--json（字段契约+增量内信号）`);
+  console.log(`${okJ ? '✅' : '❌'} 方案B-check--json（字段契约+正文召回+元数据降噪）`);
   fs.rmSync(t9, { recursive: true, force: true });
 } catch (e) { fail++; console.log('❌ 方案B-check--json（异常: ' + failMsg(e) + '）'); }
+
+// 19) 会话发现：静默未 mark 会话 → due 自动建 mark → 立即处理（fired 或 rearm），真实会话零触碰
+try {
+  const ta = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-ta-'));
+  fs.cpSync(skillDir, ta, { recursive: true });
+  const sessRoot = path.join(ta, 'sessions', 'proj');
+  const sd = path.join(sessRoot, 'session-d1');
+  fs.mkdirSync(sd, { recursive: true });
+  fs.writeFileSync(path.join(sd, 'session.jsonl'), Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  fs.utimesSync(path.join(sd, 'session.jsonl'), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3)); // mtime 1h 前=已静默
+  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(ta, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(ta, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_DISCOVER: '1' };
+  const due1 = JSON.parse(execFileSync('node', [path.join(ta, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
+  const st = JSON.parse(execFileSync('node', [path.join(ta, 'scripts', 'archive-timer.mjs'), '--status', '--json'], { encoding: 'utf8', env }));
+  const m = st.find((x) => x.sessionId === 'd1'); // sid 约定：目录名 session-d1 → mark 键 d1（无前缀，与 touch/check 一致）
+  const due1d = due1.fired.find((f) => f.sid === 'd1' && f.action === 'discovered');
+  const due1p = due1.fired.find((f) => f.sid === 'd1' && (f.action === 'fired' || f.action === 'rearm'));
+  const due2 = JSON.parse(execFileSync('node', [path.join(ta, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
+  const okN = due1d && due1p && m?.pending === true && due2.count === 0;
+  if (okN) pass++; else fail++;
+  console.log(`${okN ? '✅' : '❌'} 方案B-会话发现（未 mark 静默→discover→${due1p?.action || '?'}→幂等不重复）`);
+  fs.rmSync(ta, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-会话发现（异常: ' + failMsg(e) + '）'); }
 
 // 18) env 隔离：容器跑完后真实 audit 未被写入（日志逐字节一致 + pending 队列零新增）
 {

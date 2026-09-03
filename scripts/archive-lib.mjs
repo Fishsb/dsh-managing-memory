@@ -85,14 +85,66 @@ export async function upsertMark(entry, logFile = pathConfig().log) {
   return keep.find((m) => normalizeSid(m.sessionId || '') === n);
 }
 
-// ---- 信号召回（增量行内，纯召回）----
+// ---- 信号召回（增量行内，纯召回；JSONL 行提取对话正文匹配，结构化状态行降噪）----
+// 正文提取：user/message 与 assistant 输出 chunk 的 text 字段拼接；无正文则回退整行截断
+// 状态/元数据行（title/todo/投影/检测器等）不参与匹配——todo 等计划性内容由裁决层按需处理，不进召回
+const TEXT_KEYS = ['content', 'texts', 'text', 'dt'];
+const META_KEYS = ['session/title', 'session/summary', 'todo/write', 'todo-status', 'session/delta', 'telemetry', 'session-checkpoint', 'session-projection', 'compaction', 'message-feedback', 'tool-progress'];
+export function extractUtterance(line) {
+  let o;
+  try { o = JSON.parse(line); } catch { return String(line); } // 非 JSON 转录（明文行）：整行即正文
+  const type = String(o?.type || '');
+  if (META_KEYS.some((k) => type.startsWith(k))) return ''; // 结构化状态行：不参与召回
+  const d = o?.data || o;
+  let out = '';
+  const collect = (v) => {
+    if (typeof v === 'string') out += (out && !out.endsWith(' ') ? ' ' : '') + v;
+    else if (Array.isArray(v)) v.forEach(collect);
+    else if (v && typeof v === 'object') {
+      if (typeof v.text === 'string') collect(v.text);
+      for (const k of TEXT_KEYS) if (k !== 'text' && v[k] != null) collect(v[k]);
+    }
+  };
+  collect(d.content ?? d.texts ?? d.text ?? '');
+  return out.trim();
+}
 export function recallSignals(lines, from /* 1-based 首条新行 */, limit = 8) {
   const hits = [];
   for (let i = from - 1; i < lines.length; i++) {
-    const s = String(lines[i]).replace(/\s+/g, ' ').slice(0, 130);
+    const utter = extractUtterance(lines[i]);
+    if (!utter) continue; // JSON 元数据/无正文行：跳过（噪音不入召回）
+    const s = utter.replace(/\s+/g, ' ').slice(0, 130);
     if (SIG_RE.test(s) && s.length > 6) hits.push({ row: i + 1, text: s });
   }
   return hits.slice(0, limit);
+}
+
+// ---- 会话发现（补「无 mark 会话脱管」缺口）：枚举会话树，静默超阈值且无 mark 的纳入 ----
+// 返回 {sessionId, file, mtime}；mtime<=cutoff 且无 mark 才交给 timer（新建 mark 或直接处理由调用方定）
+export async function enumerateSessions(cutoffMs, marks) {
+  const root = pathConfig().sessionsRoot;
+  const known = new Set((marks || []).map((m) => normalizeSid(m.sessionId || '')));
+  const out = [];
+  const walk = async (d) => {
+    for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
+      if (!e.isDirectory()) continue;
+      const full = join(d, e.name);
+      let idx = null, fname = null;
+      for (const name of ['session.jsonl.zstd', 'session.jsonl']) {
+        try { idx = await stat(join(full, name)); fname = name; break; } catch { /* 试下一个 */ }
+      }
+      if (idx) {
+        const sid = e.name.replace(/^session-/, '');
+        if (!known.has(sid)) {
+          const mt = idx.mtimeMs;
+          if (mt <= cutoffMs) out.push({ sessionId: sid, file: join(full, fname), mtime: mt });
+        }
+      }
+      await walk(full);
+    }
+  };
+  await walk(root);
+  return out.sort((a, b) => a.mtime - b.mtime); // 最旧优先（最可能是被遗忘的）
 }
 
 // ---- pending 队列（audit/archive-pending/<安全名>.json；唤醒裁决入口）----
