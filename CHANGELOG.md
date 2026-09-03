@@ -9,6 +9,8 @@
 - 治理补全：facts.md 模板部署 + AGENTS/CLAUDE 规则 0（用户事实铁律）、relatedness 规则开启（warn）、scripts→pending 关联补记。
 
 ### Added
+- hybrid 插件 `@dsh-external/dsh-managing-memory` 0.0.1：daemon-loop 每 tick 调 `archive-timer --due`（宿主常驻唤醒执行者）+ 5 原生工具（status/due/check/touch/pending，走引擎 `--json`）；无 DSH checkout 按 ADR-0001 预案手写 lib 产物，依赖 junction 复用宿主树；已 `dev_inject_plugin` 注入并完成 E2E（check 真实 zstd 转录 35746 行/touch/due/status/pending）。源码 `C:\Users\lk\.dsh\plugins\dsh-managing-memory`（独立于本仓版本线）。
+- 生产技能部署副本同步：引擎 4 文件 + test.mjs + SKILL.md §9/§10 复制到 `~\.dsh\skills\managing-memory\`，生产侧回归 18/18 全绿。
 - 方案 B 引擎（ADR-0001）：`archive-lib.mjs` 公共层（定位/解码/mark/召回/队列，env 隔离）、`archive-timer.mjs`（--due/--watch/--status/--pending-list/--dequeue，到点唤醒→资格门控→落 audit/archive-pending 队列→唤醒后清理）。
 - `archive-check.mjs` 复用公共层 + `--json` 结构化；`archive-mark.mjs` 行结构扩展（pending/lastTurnAt/fireAt）+ `--touch`（重计时/清队列）/`--pending`/`--json`；参数解析值感知（--total/--lastRow 的值不再误收为位置参）。
 - SKILL §10 协议升级为方案 B（turn 后 touch / 宿主唤醒 / 队列裁决 / dequeue 清队）、§9 收尾清单 +touch 步骤；测试 13→18 用例全绿（touch/due 状态机/资格门控/done+新行/--json 契约/env 隔离）。
