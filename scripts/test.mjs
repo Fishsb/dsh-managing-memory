@@ -148,8 +148,10 @@ try {
   const st2 = jx('archive-timer.mjs', ['--status', '--json']);
   const q = JSON.parse(fs.readFileSync(path.join(t6, 'audit', 'archive-pending', 'sess-x.json'), 'utf8'));
   const due2 = jx('archive-timer.mjs', ['--due', '--json']);
-  const okB = st1[0]?.fireAt > 0 && st1[0]?.pending === false
-    && st2[0]?.pending === true && st2[0]?.fireAt === null
+  const s1 = st1.find((m) => m.sessionId === 'sess-x'); // 按 sid 取数：容器 log 可能含复制进来的真实会话条目，位置不可靠
+  const s2 = st2.find((m) => m.sessionId === 'sess-x');
+  const okB = s1?.fireAt > 0 && s1?.pending === false
+    && s2?.pending === true && s2?.fireAt == null
     && q.delta === 60 && Array.isArray(q.signals)
     && due2.count === 0;
   if (okB) pass++; else fail++;
@@ -173,7 +175,9 @@ try {
   const env2 = { ...env, ARCHIVE_MIN_LINES: '10' }; // 资格达标（10≥10）→ fired
   execFileSync('node', [path.join(t7, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env: env2 });
   const st2 = jx('archive-timer.mjs', ['--status', '--json']);
-  const okG = st1[0]?.fireAt != null && noQueue && st2[0]?.pending === true;
+  const s1 = st1.find((m) => m.sessionId === 'sess-y'); // 按 sid 取数（同 T14）
+  const s2 = st2.find((m) => m.sessionId === 'sess-y');
+  const okG = s1?.fireAt != null && noQueue && s2?.pending === true;
   if (okG) pass++; else fail++;
   console.log(`${okG ? '✅' : '❌'} 方案B-资格门控（不足 rearm 不入队/达标 fired）`);
   fs.rmSync(t7, { recursive: true, force: true });

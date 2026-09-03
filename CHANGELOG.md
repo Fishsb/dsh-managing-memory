@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Fixed
+- 测试健壮性：方案 B 状态机断言改按 sessionId 取数（此前按数组位置，容器 log 含真实会话条目时错位——生产副本 16/2 假阴性根因）；双侧 18/18 复绿。
 - 治理完整性修复：index.md CHANGELOG 死链（`../`→`../../`，pre-commit 门禁自锁解除）、补齐 root/audit-notes-pending 三模块文档与 index 导航概况/root 派生表语义字段、tree 职责注记补全。
 - 治理补全：facts.md 模板部署 + AGENTS/CLAUDE 规则 0（用户事实铁律）、relatedness 规则开启（warn）、scripts→pending 关联补记。
 
