@@ -28,8 +28,8 @@ function run(label, cmd, args, expected) {
   }
 }
 
-// 1) 真实目录体检 → exit 0
-run('体检-真实目录', 'node', [health], [0]);
+// 1) 真实目录体检 → exit 0（健康）或 2（容量>85% 警戒态，合法运行态如固化后索引 96%）
+run('体检-真实目录', 'node', [health], [0, 2]);
 
 // 2) 构造超容量副本 → exit 2
 const t1 = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-t1-'));

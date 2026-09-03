@@ -12,4 +12,9 @@
 /audit/*
 !/audit/.gitkeep
 
+# 瞬态/调试产物
+.tmp-*
+*.tmpdir/
+*.tmp
+
 node_modules/
