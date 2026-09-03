@@ -9,7 +9,7 @@
   "rules": {
     "dead-links": "error",
     "untracked-strict": "off",
-    "relatedness": "off",
+    "relatedness": "warn",
     "changelog": "off",
     "semantics": "warn",
     "size": "warn",
