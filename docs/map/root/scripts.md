@@ -10,7 +10,8 @@
 
 ## 相关模块
 <!-- 跨模块影响面：改本模块必须同步检查的模块。方向：本模块影响它 / 本模块依赖它 / 双向。由 sync --links 给候选，人工确认后填。 -->
-- `notes` — 数据读写：write_gate/read_section/session_grep 消费详情小节
+- `notes` — 数据读写：write_gate/read_section/session_grep/memory-append 消费详情小节
+- `audit` — 数据写入：memory-append 写前备份 audit\backup-*；read_section 记 access.log
 - `pending` — 数据读写：health 候选统计消费 pending\；test 断言候选召回纯只读
 - `SKILL.md` — 协议层：§6 写入门、§9 审计、§10 归档检测引用 CLI
 - `docs/map/` — 治理层：文件清单受地图漂移门禁（新增须 sync）

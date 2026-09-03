@@ -360,5 +360,22 @@ try {
   fs.rmSync(td, { recursive: true, force: true });
 } catch (e) { fail++; console.log('❌ 方案B-排空drain（异常: ' + failMsg(e) + '）'); }
 
+// 23) memory-append 固化安全阀：正常追加 / 无锚 exit 2 / 白名单外 exit 2（ADR-0002 v2 全自动固化基础）
+try {
+  const te = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-te-'));
+  fs.cpSync(skillDir, te, { recursive: true });
+  const ap = path.join(te, 'scripts', 'memory-append.mjs');
+  const target = 'notes/tools.md'; // 容器内路径（append 自定位 te）
+  const r1 = execFileSync('node', [ap, target, '发布打包坑', 'T23 验证条目 abcdef'], { encoding: 'utf8', cwd: te }).trim();
+  const okAppend = /append notes\/tools\.md :: 发布打包坑/.test(r1) && fs.readFileSync(path.join(te, 'notes', 'tools.md'), 'utf8').includes('T23 验证条目 abcdef');
+  const r2 = (() => { try { execFileSync('node', [ap, target, '不存在的小节xyz', 'x'], { cwd: te, stdio: 'pipe' }); return 0; } catch (e) { return e.status; } })();
+  const r3 = (() => { try { execFileSync('node', [ap, 'docs/evil.md', 'x', 'y'], { cwd: te, stdio: 'pipe' }); return 0; } catch (e) { return e.status; } })();
+  const okErr = r2 === 2 && r3 === 2;
+  const okGate = (() => { try { execFileSync('node', [ap, 'MEMORY.md', 'x', '--new', '[env] ' + '超限填充内容'.repeat(1000) + ' → notes/env.md §x'], { cwd: te, stdio: 'pipe' }); return 0; } catch (e) { return e.status; } })() === 1;
+  if (okAppend && okErr && okGate) pass++; else fail++;
+  console.log(`${okAppend && okErr && okGate ? '✅' : '❌'} 方案C-memory-append（追加/无锚exit2/白名单exit2/主文档超限exit1）`);
+  fs.rmSync(te, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案C-memory-append（异常: ' + failMsg(e) + '）'); }
+
 console.log(`\n结果: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

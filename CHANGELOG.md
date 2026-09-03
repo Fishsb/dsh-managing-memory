@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Added
+- 方案 C 全自动闭环（ADR-0002 v2，用户拍板无人工终审）：插件 daemon 自动 LLM 四问裁决（pending≥5/冷却 30min）→ SKIP 自动 mark done+dequeue、ADD 落候选 → 候选≥6 自动固化：LLM 结构化落点指令 + 新引擎 `memory-append`（安全阀=白名单/无锚拒写/主文档容量门禁/写前备份）→ **全自动入册，无人工环**；测试 22→23 全绿。
+- 容量分层重构：容量红线只对主文档（MEMORY 3000 / USER·AGENT 2000）；notes 等辅助文档解除硬限（>8000 仅提示）；health/gate/SKILL/spec v10 同步；容器净化修复 prod 测试 flakiness（cleanContainer + 溯源断言）。
 - 碎片治理（复盘结论 2 落地）：`--due` 内建**机械消化**——无信号且 <`ARCHIVE_MECH_NOOP_LINES`（缺省 500，0=关）的会话直接 done 不进裁决队列（消灭 82% 无谓裁决）；`--drain` **排空模式**——大 batch 循环捞历史静默未 mark 会话至无剩，一次性消化积压（终结「边清边长」）；测试 20→22 用例全绿（新增机械消化/排空正向用例；消除活跃保护 1ms 测试竞态——容器测试显式回拨 mtime）。
 - 归档队列批量裁决落地（workflow 4 波 33 agents）：302+ 会话四问裁决（ADD 54 会话/SKIP 248，宁缺毋滥），产 58 候选文件；已裁决队列文件 rename 隔离至 audit/archive-pending-done（safe-delete shim 批量删除拦截规避，可逆；2026-09-04 移出技能目录至 ~/.dsh/archive-pending-done-20260903 防容器拷贝膨胀）。
 - 候选预合并+四问固化入册（重组 5 notes 文件，全部门禁 exit 0：tools 93%/flows 80%/lessons 98%/env 81%/release 61%）：新增 13 条索引路由（动态 Cordis 坑/插件开发坑/preset 机制/无头浏览器/pmg 缺陷/DSH 组装链/实例更新 alpha SOP/记忆体系分工等），既有小节全量压缩增补（保留全部内容锚）；INDEX 元数据表 +13 行；MEMORY 索引 37 条路由 96%（超 85% 警戒线，下次审计触发点）；候选归档 pending/.processed 58 文件；镜像生产→dev 9/9 哈希一致。

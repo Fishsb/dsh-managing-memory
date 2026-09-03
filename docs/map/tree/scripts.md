@@ -9,7 +9,8 @@
 - `scripts/candidate_grep.mjs` — (2.5 KB) 候选召回：转录信号词扫描 → pending 候选（ADD-only，纯只读）
 - `scripts/memory_health_check.mjs` — (10.5 KB) 记忆健康审计：覆盖/重复/指针·格式/超限四类检查，报告归档 audit\
 - `scripts/memory_write_gate.mjs` — (3.1 KB) 记忆写入门禁：容量+指针校验（exit 0/1/2=通过/超容/悬空）
+- `scripts/memory-append.mjs` — (4.5 KB) 固化安全阀（ADR-0002 v2）：追加条目到既有小节/新索引行；白名单目标/无锚拒写/主文档容量门禁/写前备份 audit\backup
 - `scripts/read_section.mjs` — (2.3 KB) 小节定位读取：§ 内容锚检索，命中写 audit\access.log（提升判据）
 - `scripts/session_grep.mjs` — (2.0 KB) 会话回忆：zstd 转录关键词检索（Episodic）
-- `scripts/test.mjs` — (26.3 KB) 引擎回归测试：22 用例（门禁/召回/归档增量/方案B 状态机/env 隔离/机械消化/排空）
+- `scripts/test.mjs` — (27.9 KB) 引擎回归测试：22 用例（门禁/召回/归档增量/方案B 状态机/env 隔离/机械消化/排空）
 - `scripts/vendor/fzstd.cjs` — (23.9 KB) vendored zstd 解码库（零依赖转录解压，勿手改）

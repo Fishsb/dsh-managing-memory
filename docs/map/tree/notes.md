@@ -8,5 +8,5 @@
 - `notes/INDEX.md` — (4.7 KB) 子文档注册表：七类详情清单（测试骨架对齐依据）
 - `notes/lessons.md` — (5.4 KB) 开发夹具：踩坑教训详情骨架
 - `notes/release.md` — (3.3 KB) 开发夹具：发布教训详情骨架
-- `notes/tools.md` — (4.9 KB) 开发夹具：工具配置详情骨架（供检索路由回归）
+- `notes/tools.md` — (5.0 KB) 开发夹具：工具配置详情骨架（供检索路由回归）
 - `notes/user.md` — (2.1 KB) 开发夹具：用户画像详情骨架
