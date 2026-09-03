@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Added
+- 活跃保护+数据驱动重武装（机器层兜底）：fireAt 到点但转录 mtime 仍新鲜 → 引擎自动 rearm（忘 touch 的活跃会话不误触发，touch 降级为可选优化）；fireAt=null+已静默+转录 size 变化（mark 记录 lastSize）→ 自动重武装（重启重计时兜底）；测试 19→20 用例全绿（活跃 rearm→静默 fired→clear 后变化再武装）。
 - 会话发现机制（补脱管缺口）：`archive-timer --due` 增加发现步——静默超阈值且无 mark 的会话自动建 mark 入网（agent 忘 touch/工具型会话零协议成本），`ARCHIVE_DISCOVER=0` 可关、`ARCHIVE_DISCOVER_BATCH` 限批最旧优先；同毫秒竞态修复（now 在发现步后采样）；测试 18→19 用例全绿。真实环境验证：历史会话批量入网、本会话被发现路径覆盖。
 - 召回增强：JSONL 转录行提取对话正文匹配（extractUtterance），session/title·todo/write 等结构化状态行降噪不入召回；信号更准（todo 计划性内容不再误命中）。
 

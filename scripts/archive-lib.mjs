@@ -28,6 +28,8 @@ export const DEFAULT_SILENT_MS = 780000; // 静默阈值 780s（自最后 touch 
 export const SIG_RE = /(记住|注意|踩坑|纠正|以后|别再|失败|改用|原因|根因|方案|决策|配置|红线|原则)/;
 
 const exists = async (p) => { try { await stat(p); return true; } catch { return false; } };
+// 文件指纹（mtime/size 一次取）：mtime=活跃保护判据，size=数据驱动重武装判据
+export async function statFile(p) { try { const s = await stat(p); return { mtime: s.mtimeMs, size: s.size }; } catch { return null; } }
 
 // ---- 转录定位：直接文件路径 或 按 sessionId 走会话树（zstd 优先，明文 .jsonl 兜底）----
 export async function locateTranscript(target) {

@@ -8,6 +8,8 @@
 //   node scripts/archive-timer.mjs --dequeue <sessionId>     # 裁决完成后清理该会话队列文件（与 --pending-list 配对）
 // env: ARCHIVE_LOG / ARCHIVE_PENDING / ARCHIVE_SESSIONS / ARCHIVE_SILENT_MS / ARCHIVE_MIN_LINES（资格门控，缺省 50）
 //      ARCHIVE_DISCOVER=0 关闭发现步 / ARCHIVE_DISCOVER_BATCH 每 tick 发现上限（缺省 3，最旧优先）
+// 活跃保护：fireAt 到点但转录 mtime 仍新鲜（<静默阈值）→ rearm 重计时（忘 touch 的活跃会话不误触发，touch 降级为可选优化）
+// 数据驱动重武装：fireAt=null + 已静默 + 转录 size 变化（mark 记录 lastSize）→ 重新武装（重启重计时兜底）
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as lib from './archive-lib.mjs';
@@ -43,30 +45,56 @@ async function runDue() {
   if (fired.length) marks = await lib.readMarks(cfg.log); // 发现新建了 mark → 重读，本轮即处理
   const now = Date.now(); // 发现步之后采样：新建 mark 的 fireAt(=发现时刻) 必然 ≤ now，同轮即处理
   for (const m of marks) {
-    if (m.fireAt == null || m.fireAt > now) continue; // 未武装/未到点
     const sid = m.sessionId;
+
+    // ── 数据驱动重武装：fireAt=null（已被清理）+ 已静默 + 转录 size 变化（新行/继续）→ 重新武装（重启重计时兜底）──
+    if (m.fireAt == null && !m.pending) {
+      const tfile = await lib.locateTranscript(sid);
+      if (tfile) {
+        const fp = await lib.statFile(tfile);
+        const changed = fp && m.lastSize != null && fp.size !== m.lastSize;
+        const silent = !fp || fp.mtime <= now - cfg.silentMs;
+        if (changed && silent) {
+          await lib.upsertMark({ ...m, fireAt: now, lastTurnAt: fp.mtime, at: new Date().toISOString() });
+          fired.push({ sid, action: 'rearm', reason: `fireAt=null 但转录已变化且静默（size ${m.lastSize}→${fp.size}）→ 数据驱动重武装` });
+          continue;
+        }
+      }
+      continue; // fireAt=null 且无重武装证据：保持清理态（幂等）
+    }
+
+    if (m.fireAt == null || m.fireAt > now) continue; // 未武装/未到点
     if (m.pending && (await lib.readPending(sid, cfg.pendingDir))) continue; // 已入队待裁决（幂等）
     const file = await lib.locateTranscript(sid);
     if (!file) { fired.push({ sid, action: 'skip', reason: '转录未找到' }); continue; }
+
+    // ── 活跃保护：转录 mtime 新鲜 = 机器可测的活跃证据（忘 touch 的活跃会话不误触发）──
+    const fp = await lib.statFile(file);
+    if (fp && fp.mtime > now - cfg.silentMs) {
+      await lib.upsertMark({ ...m, fireAt: now + cfg.silentMs, lastTurnAt: fp.mtime, at: new Date().toISOString() });
+      fired.push({ sid, action: 'rearm', reason: `转录仍活跃（mtime ${new Date(fp.mtime).toISOString()}）→ 重计时（活跃保护）` });
+      continue;
+    }
+
     let text = '';
     try { text = await lib.decodeTranscript(file); } catch (e) { fired.push({ sid, action: 'skip', reason: '解码失败: ' + e.message }); continue; }
     const total = lib.countLines(text);
     if (total <= m.lastRow) {
-      // 无增量：唤醒后清理 fireAt（防重复触发）；done 保持——数据驱动重武装
-      await lib.upsertMark({ ...m, fireAt: null });
+      // 无增量：唤醒后清理 fireAt（防重复触发）；done 保持——size 已记录，后续变化走数据驱动重武装
+      await lib.upsertMark({ ...m, fireAt: null, lastSize: fp ? fp.size : m.lastSize, at: new Date().toISOString() });
       fired.push({ sid, action: 'clear', reason: `无增量 (lastRow=${m.lastRow}, total=${total})` });
       continue;
     }
     if (total < minLines()) {
       // 资格不够：重新计时（窗口重来）
-      await lib.upsertMark({ ...m, fireAt: now + cfg.silentMs, at: new Date().toISOString() });
+      await lib.upsertMark({ ...m, fireAt: now + cfg.silentMs, lastTurnAt: fp.mtime, at: new Date().toISOString() });
       fired.push({ sid, action: 'rearm', reason: `行数 ${total} < ${minLines()}，重新计时` });
       continue;
     }
     const signals = lib.recallSignals(text.split('\n').filter(Boolean), m.lastRow + 1);
     const payload = { dueAt: new Date().toISOString(), lastRow: m.lastRow, total, delta: total - m.lastRow, done: !!m.done, signals, transcript: file };
     await lib.writePending(sid, payload, cfg.pendingDir);
-    await lib.upsertMark({ ...m, pending: true, fireAt: null, at: new Date().toISOString() }); // 唤醒后清理
+    await lib.upsertMark({ ...m, pending: true, fireAt: null, lastSize: fp ? fp.size : m.lastSize, at: new Date().toISOString() }); // 唤醒后清理
     fired.push({ sid, action: 'fired', delta: payload.delta, signals: signals.length, queue: lib.pendingFileFor(sid, cfg.pendingDir) });
   }
   return fired;

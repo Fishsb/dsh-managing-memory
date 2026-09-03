@@ -261,5 +261,44 @@ try {
   console.log(`${okI ? '✅' : '❌'} 方案B-env隔离（真实 audit 未写入：log ${REAL_LOG_BEFORE.length === logAfter.length ? '一致' : '✗'} / pending ${REAL_PEND_BEFORE}→${pendAfter}）`);
 }
 
+// 20) 活跃保护 + 数据驱动重武装：①到点但转录新鲜（忘 touch 模拟）→rearm 不入队；②静默后→fired；③clear 后转录变化→数据重武装→再 fired
+try {
+  const tb = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-tb-'));
+  fs.cpSync(skillDir, tb, { recursive: true });
+  const sessRoot = path.join(tb, 'sessions', 'p2');
+  const sd = path.join(sessRoot, 'session-act');
+  fs.mkdirSync(sd, { recursive: true });
+  const sf = path.join(sd, 'session.jsonl');
+  fs.writeFileSync(sf, Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(tb, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(tb, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '60000', ARCHIVE_DISCOVER: '0' }; // 保护窗口=60s
+  const due = () => JSON.parse(execFileSync('node', [path.join(tb, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
+  const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(tb, 'scripts', f), ...a], { encoding: 'utf8', env }));
+  const logP = path.join(tb, 'audit', 'archive-progress.jsonl');
+  const expireFireAt = () => { const ls = fs.readFileSync(logP, 'utf8').split('\n').filter(Boolean).map((l) => { const o = JSON.parse(l); if (o.sessionId === 'act') o.fireAt = Date.now() - 1000; return JSON.stringify(o); }); fs.writeFileSync(logP, ls.join('\n') + '\n'); };
+  // ① touch 后把 fireAt 置为已过期（模拟忘 touch 的活跃会话：fireAt 到点但转录 mtime 新鲜）→ 活跃保护 rearm
+  jx('archive-mark.mjs', ['act', '--touch', '--lastRow', '0', '--json']);
+  expireFireAt();
+  const r1 = due().fired.filter((f) => f.sid === 'act');
+  const guard = r1.some((f) => f.action === 'rearm' && /活跃保护/.test(f.reason));
+  const st1 = JSON.parse(execFileSync('node', [path.join(tb, 'scripts', 'archive-timer.mjs'), '--status', '--json'], { encoding: 'utf8', env })).find((x) => x.sessionId === 'act');
+  // ② 回拨 mtime=已静默 → fireAt 已过期 → 真正 fired
+  expireFireAt();
+  fs.utimesSync(sf, new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
+  const r2 = due().fired.filter((f) => f.sid === 'act');
+  const firedNow = r2.some((f) => f.action === 'fired' && f.delta === 60);
+  // ③ 裁决清队 → 转录追加（模拟追加后归于静默：回拨 mtime）→ 数据驱动重武装 → 再 fired（fired 不改 lastRow，delta=62）
+  execFileSync('node', [path.join(tb, 'scripts', 'archive-timer.mjs'), '--dequeue', 'act'], { env, stdio: 'ignore' });
+  fs.appendFileSync(sf, 'new1\nnew2\n');
+  fs.utimesSync(sf, new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
+  const r3a = due().fired.filter((f) => f.sid === 'act');
+  const dataRearm = r3a.some((f) => f.action === 'rearm' && /数据驱动/.test(f.reason));
+  const r3b = due().fired.filter((f) => f.sid === 'act');
+  const firedAgain = r3b.some((f) => f.action === 'fired' && f.delta === 62);
+  const okT = guard && st1?.pending === false && firedNow && dataRearm && firedAgain;
+  if (okT) pass++; else fail++;
+  console.log(`${okT ? '✅' : '❌'} 方案B-活跃保护+数据重武装（新鲜 rearm→静默 fired→clear 后变化再武装 fired）`);
+  fs.rmSync(tb, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-活跃保护+数据重武装（异常: ' + failMsg(e) + '）'); }
+
 console.log(`\n结果: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);
