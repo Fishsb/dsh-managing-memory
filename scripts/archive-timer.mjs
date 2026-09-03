@@ -3,11 +3,13 @@
 // 用法:
 //   node scripts/archive-timer.mjs --due            # 发现静默未 mark 会话（自动建 mark）+ 扫描 mark：fireAt 到点 → 门控 → 机械召回 → 落 audit/archive-pending/<sid>.json → pending=true/fireAt=null
 //   node scripts/archive-timer.mjs --watch [ms]     # 周期常驻执行 --due（缺省 60s；插件 daemon-loop 每 tick 调 --due，本模式供 CLI 独立跑）
+//   node scripts/archive-timer.mjs --drain          # 排空模式：循环捞历史静默未 mark 会话直至无剩（一次性消化积压，结束边清边长）
 //   node scripts/archive-timer.mjs --status [--json]
 //   node scripts/archive-timer.mjs --pending-list [--json]   # pending 队列清单（裁决入口）
 //   node scripts/archive-timer.mjs --dequeue <sessionId>     # 裁决完成后清理该会话队列文件（与 --pending-list 配对）
 // env: ARCHIVE_LOG / ARCHIVE_PENDING / ARCHIVE_SESSIONS / ARCHIVE_SILENT_MS / ARCHIVE_MIN_LINES（资格门控，缺省 50）
-//      ARCHIVE_DISCOVER=0 关闭发现步 / ARCHIVE_DISCOVER_BATCH 每 tick 发现上限（缺省 3，最旧优先）
+//      ARCHIVE_DISCOVER=0 关闭发现步 / ARCHIVE_DISCOVER_BATCH 每 tick 发现上限（缺省 3；--drain 忽略）
+//      ARCHIVE_MECH_NOOP_LINES 机械消化阈值（无信号且小于此行数 → 直接 done 不进队列，碎片治理；缺省 500，0=关闭）
 // 活跃保护：fireAt 到点但转录 mtime 仍新鲜（<静默阈值）→ rearm 重计时（忘 touch 的活跃会话不误触发，touch 降级为可选优化）
 // 数据驱动重武装：fireAt=null + 已静默 + 转录 size 变化（mark 记录 lastSize）→ 重新武装（重启重计时兜底）
 import { readFile } from 'node:fs/promises';
@@ -16,20 +18,21 @@ import * as lib from './archive-lib.mjs';
 
 const argv = process.argv.slice(2);
 const wantJson = argv.includes('--json');
-const mode = argv.includes('--due') ? 'due' : argv.includes('--watch') ? 'watch' : argv.includes('--status') ? 'status' : argv.includes('--pending-list') ? 'plist' : argv.includes('--dequeue') ? 'deq' : null;
-if (!mode) { console.error('用法: node scripts/archive-timer.mjs --due | --watch [ms] | --status [--json] | --pending-list [--json] | --dequeue <sessionId>'); process.exit(3); }
+const mode = argv.includes('--due') ? 'due' : argv.includes('--watch') ? 'watch' : argv.includes('--drain') ? 'drain' : argv.includes('--status') ? 'status' : argv.includes('--pending-list') ? 'plist' : argv.includes('--dequeue') ? 'deq' : null;
+if (!mode) { console.error('用法: node scripts/archive-timer.mjs --due | --drain | --watch [ms] | --status [--json] | --pending-list [--json] | --dequeue <sessionId>'); process.exit(3); }
 
 const cfg = lib.pathConfig();
 const minLines = () => Number(process.env.ARCHIVE_MIN_LINES) || 50;
-const discoverBatch = () => Number(process.env.ARCHIVE_DISCOVER_BATCH) || 3; // 每 tick 最多发现的未 mark 会话数（摊平成本）
+const mechNoopLines = () => { const v = process.env.ARCHIVE_MECH_NOOP_LINES; return v == null || v === '' ? 500 : Number(v); }; // 0=关闭
+const discoverBatch = () => Number(process.env.ARCHIVE_DISCOVER_BATCH) || 3; // 每 tick 最多发现的未 mark 会话数（--drain 忽略）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- 发现步（补「无 mark 会话脱管」缺口）：静默超阈值的未 mark 会话 → 自动建 mark（下轮 tick 正常走门控/入队）----
 // 资格：转录 mtime 已静默超 silentMs；跳过 ARCHIVE_DISCOVER 空目录（测试/工具自检）
-async function discoverSessions(marks) {
+async function discoverSessions(marks, batchOverride) {
   if (String(process.env.ARCHIVE_DISCOVER) === '0') return [];
   const now = Date.now();
-  const cands = (await lib.enumerateSessions(now - cfg.silentMs, marks)).slice(0, discoverBatch());
+  const cands = (await lib.enumerateSessions(now - cfg.silentMs, marks)).slice(0, batchOverride ?? discoverBatch());
   const discovered = [];
   for (const c of cands) {
     await lib.upsertMark({ sessionId: c.sessionId, lastRow: 0, done: false, pending: false, lastTurnAt: c.mtime, fireAt: now, at: new Date().toISOString() });
@@ -38,10 +41,10 @@ async function discoverSessions(marks) {
   return discovered;
 }
 
-// ---- 核心扫描：发现 → fireAt 到点 → 触发/清理/重武装（幂等：已入队或已清理不再触发）----
-async function runDue() {
+// ---- 核心扫描：发现 → fireAt 到点 → 触发/清理/重武装/机械消化（幂等：已入队或已清理不再触发）----
+async function runDue(batchOverride) {
   let marks = await lib.readMarks(cfg.log);
-  const fired = await discoverSessions(marks);
+  const fired = await discoverSessions(marks, batchOverride);
   if (fired.length) marks = await lib.readMarks(cfg.log); // 发现新建了 mark → 重读，本轮即处理
   const now = Date.now(); // 发现步之后采样：新建 mark 的 fireAt(=发现时刻) 必然 ≤ now，同轮即处理
   for (const m of marks) {
@@ -92,12 +95,40 @@ async function runDue() {
       continue;
     }
     const signals = lib.recallSignals(text.split('\n').filter(Boolean), m.lastRow + 1);
+    // ── 机械消化（碎片治理）：无信号且会话小（空壳/一次性碎片）→ 直接 done，不进裁决队列 ──
+    if (!signals.length && total < mechNoopLines()) {
+      await lib.upsertMark({ ...m, lastRow: total, done: true, pending: false, fireAt: null, lastSize: fp ? fp.size : m.lastSize, at: new Date().toISOString() });
+      fired.push({ sid, action: 'noop', reason: `机械消化：无信号且 ${total} 行 < ${mechNoopLines()}（碎片/空壳），done` });
+      continue;
+    }
     const payload = { dueAt: new Date().toISOString(), lastRow: m.lastRow, total, delta: total - m.lastRow, done: !!m.done, signals, transcript: file };
     await lib.writePending(sid, payload, cfg.pendingDir);
     await lib.upsertMark({ ...m, pending: true, fireAt: null, lastSize: fp ? fp.size : m.lastSize, at: new Date().toISOString() }); // 唤醒后清理
     fired.push({ sid, action: 'fired', delta: payload.delta, signals: signals.length, queue: lib.pendingFileFor(sid, cfg.pendingDir) });
   }
   return fired;
+}
+
+if (mode === 'drain') {
+  // 排空模式：大 batch 循环捞历史静默未 mark 会话，直到无剩——一次性消化积压（终结「边清边长」）
+  const rounds = [];
+  for (let r = 1; r <= 100; r++) {
+    const fired = await runDue(1e9); // batch 无限：本轮捞光所有静默未 mark
+    if (!fired.length) break;
+    rounds.push({ round: r, count: fired.length, fired });
+    if (r >= 100) break; // 防御上限（正常静默池有限，不会触达）
+  }
+  const all = rounds.flatMap((x) => x.fired);
+  const byAct = {};
+  for (const f of all) byAct[f.action] = (byAct[f.action] || 0) + 1;
+  if (wantJson) console.log(JSON.stringify({ rounds: rounds.length, total: all.length, byAct, rounds }, null, 2));
+  else {
+    console.log(`排空完成：${rounds.length} 轮 / ${all.length} 动作`);
+    console.log(JSON.stringify(byAct));
+    const remain = await lib.enumerateSessions(Date.now() - cfg.silentMs, await lib.readMarks(cfg.log));
+    console.log(`剩余静默未 mark 会话: ${remain.length}（0=积压已排空）`);
+  }
+  process.exit(0);
 }
 
 if (mode === 'due') {

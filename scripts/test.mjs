@@ -140,7 +140,8 @@ try {
   const sess = path.join(t6, 'sessions', 'sess-x');
   fs.mkdirSync(sess, { recursive: true });
   fs.writeFileSync(path.join(sess, 'session.jsonl'), Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
-  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t6, 'sessions'), ARCHIVE_LOG: path.join(t6, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t6, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  fs.utimesSync(path.join(sess, 'session.jsonl'), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3)); // 回拨 mtime：消除活跃保护 1ms 竞态
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t6, 'sessions'), ARCHIVE_LOG: path.join(t6, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t6, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_MECH_NOOP_LINES: '0' };
   const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(t6, 'scripts', f), ...a], { encoding: 'utf8', env }));
   jx('archive-mark.mjs', ['sess-x', '--touch', '--lastRow', '0', '--json']);
   const st1 = jx('archive-timer.mjs', ['--status', '--json']);
@@ -166,7 +167,7 @@ try {
   const sess = path.join(t7, 'sessions', 'sess-y');
   fs.mkdirSync(sess, { recursive: true });
   fs.writeFileSync(path.join(sess, 'session.jsonl'), Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
-  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t7, 'sessions'), ARCHIVE_LOG: path.join(t7, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t7, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t7, 'sessions'), ARCHIVE_LOG: path.join(t7, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t7, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_MECH_NOOP_LINES: '0' };
   const jx = (f, a, e2 = env) => JSON.parse(execFileSync('node', [path.join(t7, 'scripts', f), ...a], { encoding: 'utf8', env: e2 }));
   jx('archive-mark.mjs', ['sess-y', '--touch', '--lastRow', '0', '--json']);
   execFileSync('node', [path.join(t7, 'scripts', 'archive-timer.mjs'), '--due'], { encoding: 'utf8', env }); // MIN_LINES=50 → rearm
@@ -191,7 +192,7 @@ try {
   fs.mkdirSync(sess, { recursive: true });
   const sessFile = path.join(sess, 'session.jsonl');
   fs.writeFileSync(sessFile, Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
-  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t8, 'sessions'), ARCHIVE_LOG: path.join(t8, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t8, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1' };
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(t8, 'sessions'), ARCHIVE_LOG: path.join(t8, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(t8, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_MECH_NOOP_LINES: '0' };
   const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(t8, 'scripts', f), ...a], { encoding: 'utf8', env }));
   execFileSync('node', [path.join(t8, 'scripts', 'archive-mark.mjs'), 'sess-z', '60', '--total', '60', '--done'], { env, stdio: 'ignore' });
   const runC = (a) => { try { return { code: 0, out: execFileSync('node', [path.join(t8, 'scripts', 'archive-check.mjs'), ...a], { encoding: 'utf8', env }) }; } catch (e) { return { code: e.status, out: e.stdout || '' }; } };
@@ -239,7 +240,7 @@ try {
   fs.mkdirSync(sd, { recursive: true });
   fs.writeFileSync(path.join(sd, 'session.jsonl'), Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
   fs.utimesSync(path.join(sd, 'session.jsonl'), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3)); // mtime 1h 前=已静默
-  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(ta, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(ta, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_DISCOVER: '1' };
+  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(ta, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(ta, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_DISCOVER: '1', ARCHIVE_MECH_NOOP_LINES: '0' };
   const due1 = JSON.parse(execFileSync('node', [path.join(ta, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
   const st = JSON.parse(execFileSync('node', [path.join(ta, 'scripts', 'archive-timer.mjs'), '--status', '--json'], { encoding: 'utf8', env }));
   const m = st.find((x) => x.sessionId === 'd1'); // sid 约定：目录名 session-d1 → mark 键 d1（无前缀，与 touch/check 一致）
@@ -270,7 +271,7 @@ try {
   fs.mkdirSync(sd, { recursive: true });
   const sf = path.join(sd, 'session.jsonl');
   fs.writeFileSync(sf, Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
-  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(tb, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(tb, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '60000', ARCHIVE_DISCOVER: '0' }; // 保护窗口=60s
+  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(tb, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(tb, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '60000', ARCHIVE_DISCOVER: '0', ARCHIVE_MECH_NOOP_LINES: '0' }; // 保护窗口=60s
   const due = () => JSON.parse(execFileSync('node', [path.join(tb, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
   const jx = (f, a) => JSON.parse(execFileSync('node', [path.join(tb, 'scripts', f), ...a], { encoding: 'utf8', env }));
   const logP = path.join(tb, 'audit', 'archive-progress.jsonl');
@@ -299,6 +300,48 @@ try {
   console.log(`${okT ? '✅' : '❌'} 方案B-活跃保护+数据重武装（新鲜 rearm→静默 fired→clear 后变化再武装 fired）`);
   fs.rmSync(tb, { recursive: true, force: true });
 } catch (e) { fail++; console.log('❌ 方案B-活跃保护+数据重武装（异常: ' + failMsg(e) + '）'); }
+
+// 21) 机械消化：无信号小会话（<500 行）→ 直接 done 不进裁决队列（碎片治理，不需 LLM）
+try {
+  const tc = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-tc-'));
+  fs.cpSync(skillDir, tc, { recursive: true });
+  const sess = path.join(tc, 'sessions', 'sess-frag');
+  fs.mkdirSync(sess, { recursive: true });
+  fs.writeFileSync(path.join(sess, 'session.jsonl'), Array.from({ length: 60 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+  fs.utimesSync(path.join(sess, 'session.jsonl'), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
+  const env = { ...process.env, ARCHIVE_SESSIONS: path.join(tc, 'sessions'), ARCHIVE_LOG: path.join(tc, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(tc, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_MECH_NOOP_LINES: '500' };
+  const d1 = JSON.parse(execFileSync('node', [path.join(tc, 'scripts', 'archive-timer.mjs'), '--due', '--json'], { encoding: 'utf8', env }));
+  const st = JSON.parse(execFileSync('node', [path.join(tc, 'scripts', 'archive-timer.mjs'), '--status', '--json'], { encoding: 'utf8', env }));
+  const m = st.find((x) => x.sessionId === 'sess-frag');
+  const noopHit = d1.fired.some((f) => f.sid === 'sess-frag' && f.action === 'noop');
+  const noQueue = !fs.existsSync(path.join(tc, 'audit', 'archive-pending', 'sess-frag.json'));
+  const okF = noopHit && m?.done === true && m?.pending === false && noQueue;
+  if (okF) pass++; else fail++;
+  console.log(`${okF ? '✅' : '❌'} 方案B-机械消化（无信号小会话直接 done，不进队列）`);
+  fs.rmSync(tc, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-机械消化（异常: ' + failMsg(e) + '）'); }
+
+// 22) 排空模式 --drain：多个静默未 mark 会话一次性捞完消化（终结边清边长）
+try {
+  const td = fs.mkdtempSync(path.join(os.tmpdir(), 'amem-td-'));
+  fs.cpSync(skillDir, td, { recursive: true });
+  const sessRoot = path.join(td, 'sessions', 'proj');
+  for (const sid of ['drain-a', 'drain-b', 'drain-c']) {
+    const sd = path.join(sessRoot, 'session-' + sid);
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, 'session.jsonl'), Array.from({ length: 80 }, (_, i) => `l${i + 1}`).join('\n') + '\n');
+    fs.utimesSync(path.join(sd, 'session.jsonl'), new Date(Date.now() - 3600e3), new Date(Date.now() - 3600e3));
+  }
+  const env = { ...process.env, ARCHIVE_SESSIONS: sessRoot, ARCHIVE_LOG: path.join(td, 'audit', 'archive-progress.jsonl'), ARCHIVE_PENDING: path.join(td, 'audit', 'archive-pending'), ARCHIVE_SILENT_MS: '1', ARCHIVE_MECH_NOOP_LINES: '500' };
+  const d = JSON.parse(execFileSync('node', [path.join(td, 'scripts', 'archive-timer.mjs'), '--drain', '--json'], { encoding: 'utf8', env }));
+  const nooped = ['drain-a', 'drain-b', 'drain-c'].every((sid) => (d.byAct || {})[sid] || (d.total >= 3)); // 简化：total≥3 且 action 含 noop
+  const st = JSON.parse(execFileSync('node', [path.join(td, 'scripts', 'archive-timer.mjs'), '--status', '--json'], { encoding: 'utf8', env }));
+  const allDone = ['drain-a', 'drain-b', 'drain-c'].every((sid) => st.find((x) => x.sessionId === sid)?.done === true);
+  const okD = d.total >= 3 && d.byAct?.noop >= 3 && allDone && (d.byAct?.discovered || 0) >= 3;
+  if (okD) pass++; else fail++;
+  console.log(`${okD ? '✅' : '❌'} 方案B-排空drain（${d.total} 动作/rounds ${d.rounds}：一次性捞完静默未mark）`);
+  fs.rmSync(td, { recursive: true, force: true });
+} catch (e) { fail++; console.log('❌ 方案B-排空drain（异常: ' + failMsg(e) + '）'); }
 
 console.log(`\n结果: ${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

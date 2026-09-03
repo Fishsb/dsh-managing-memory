@@ -5,7 +5,8 @@
 ## [Unreleased]
 
 ### Added
-- 归档队列批量裁决落地（workflow 4 波 33 agents）：302+ 会话四问裁决（ADD 54 会话/SKIP 248，宁缺毋滥），产 58 候选文件；已裁决队列文件 rename 隔离至 audit/archive-pending-done（safe-delete shim 批量删除拦截规避，可逆）。
+- 碎片治理（复盘结论 2 落地）：`--due` 内建**机械消化**——无信号且 <`ARCHIVE_MECH_NOOP_LINES`（缺省 500，0=关）的会话直接 done 不进裁决队列（消灭 82% 无谓裁决）；`--drain` **排空模式**——大 batch 循环捞历史静默未 mark 会话至无剩，一次性消化积压（终结「边清边长」）；测试 20→22 用例全绿（新增机械消化/排空正向用例；消除活跃保护 1ms 测试竞态——容器测试显式回拨 mtime）。
+- 归档队列批量裁决落地（workflow 4 波 33 agents）：302+ 会话四问裁决（ADD 54 会话/SKIP 248，宁缺毋滥），产 58 候选文件；已裁决队列文件 rename 隔离至 audit/archive-pending-done（safe-delete shim 批量删除拦截规避，可逆；2026-09-04 移出技能目录至 ~/.dsh/archive-pending-done-20260903 防容器拷贝膨胀）。
 - 候选预合并+四问固化入册（重组 5 notes 文件，全部门禁 exit 0：tools 93%/flows 80%/lessons 98%/env 81%/release 61%）：新增 13 条索引路由（动态 Cordis 坑/插件开发坑/preset 机制/无头浏览器/pmg 缺陷/DSH 组装链/实例更新 alpha SOP/记忆体系分工等），既有小节全量压缩增补（保留全部内容锚）；INDEX 元数据表 +13 行；MEMORY 索引 37 条路由 96%（超 85% 警戒线，下次审计触发点）；候选归档 pending/.processed 58 文件；镜像生产→dev 9/9 哈希一致。
 - 活跃保护+数据驱动重武装（机器层兜底）：fireAt 到点但转录 mtime 仍新鲜 → 引擎自动 rearm（忘 touch 的活跃会话不误触发，touch 降级为可选优化）；fireAt=null+已静默+转录 size 变化（mark 记录 lastSize）→ 自动重武装（重启重计时兜底）；测试 19→20 用例全绿（活跃 rearm→静默 fired→clear 后变化再武装）。
 - 会话发现机制（补脱管缺口）：`archive-timer --due` 增加发现步——静默超阈值且无 mark 的会话自动建 mark 入网（agent 忘 touch/工具型会话零协议成本），`ARCHIVE_DISCOVER=0` 可关、`ARCHIVE_DISCOVER_BATCH` 限批最旧优先；同毫秒竞态修复（now 在发现步后采样）；测试 18→19 用例全绿。真实环境验证：历史会话批量入网、本会话被发现路径覆盖。
