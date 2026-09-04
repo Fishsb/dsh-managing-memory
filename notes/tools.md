@@ -25,6 +25,7 @@ MEMORY.md `[tool]` 索引条目的详情。**技能内文件间引用一律相�
 - pwsh `git diff` 大输出经管道被当单字符串炸屏 → 先重定向文件再用 read 读
 - pwsh `gh api 2>&1 | ConvertFrom-Json` 混流报错被吞 → 依赖 `$LASTEXITCODE`、分开捕获、先看原始输出
 - 已删 PR：`gh pr list` 不可见，`git ls-remote` 仍见 refs/pull/N → fetch 到 FETCH_HEAD 审查
+- pnpm 装带构建脚本的 git 依赖默认拒建：在 pnpm-workspace.yaml 的 allowBuilds 列入该键；无 prepare 则无 lib，作者须提供构建产物；最稳避免 git，走 registry 直装后自检装载并配置转储。
 
 ## 模型链路与排障（2026-08-23/24，2026-09-03 增补）
 - llm-pi 自定义 provider：键不在内置目录则模型元数据缺失（默认 262144 不可信）→ 只放新增模型并逐个补元数据

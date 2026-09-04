@@ -99,7 +99,7 @@ Research & Execution Agent：检索、分析、诊断、建议、交付；代码
 - **四问**：Q0 已有归属？（是→不写）→ Q1 下周用得上？（否→不存）→ Q2 关于谁？（用户→USER·agent→AGENT·环境→MEMORY）→ Q3 能合并？
 - **分类**：USER 5 类画像；AGENT 自指；MEMORY 4 标签 `[env]/[tool]/[flow]/[lesson]`
 - **红牌不存**：PID/端口、一次性上下文、任务进度、可搜索知识、大段代码/日志、重复事实、已承载细节
-- **容量**：MEMORY ≤2200 / USER·AGENT ≤1375 / notes 每份 ≤3000；>80% 合并；>85% 或任务收尾审计
+- **容量**：MEMORY ≤3000 / USER·AGENT ≤2000（会话注入面）；notes 不设硬限（>8000 仅提示）；>80% 合并；>85% 或任务收尾审计
 - **四类对齐**：语义=notes\env/tools/flows · 画像=USER+AGENT · 情景=sessions（session_grep）· 程序=SKILL L1-L4+flows
 
 ### 记忆检索速查（主动检索路由）

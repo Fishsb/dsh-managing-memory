@@ -55,3 +55,8 @@ MEMORY.md `[lesson]` 索引条目的详情。**技能内文件间引用一律相
 - nssm 删除规程：确认 → `reg export` → `nssm remove confirm`（勿 sc delete）→ 双核验；AppEnvironmentExtra 整体替换会清空既有环境（配置事故）→ 增量勿整组覆盖
 - **nssm 控制台输出本身为 UTF-16**（非 GBK 显示层）→ Out-* 转码后判读；被服务独占的日志用共享读（FileShare.ReadWrite）取证
 - 端口主备 dsh-web 3080 + alt 3090；宿主重启脱离进程树=WMI Win32_Process.Create 延时执行；破坏性操作可验证备份（字节数核验才算数）
+
+## 治理漂移根因（2026-09-04）
+- 语义失真 check 失明：结构门禁（死链/格式/疤痕词）拦不住「内容与现实矛盾」——ADR v1 旧稿随 v2 提交、计数陈旧、README↔ADR 状态互斥全部放行；reconcile 逐文档重读是唯一语义防线（mtime 驱动、高召回低精度是特性非缺陷）
+- 三断点模式：①拍板后只改代码/CHANGELOG 不回写 ADR（commit msg 称 v2 而文件仍是 v1——心智已同步、实际没同步）②同提交先写计数后加用例不回看 ③会话中断截断收尾 → 引擎改动+地图关联成未提交尾巴
+- 纪律：拍板即落 ADR；commit 后工作区必净（git status 干净才算收尾）；reconcile 跑完必 --done 重置基线；pmg 可加 README↔ADR 状态一致性机检规则

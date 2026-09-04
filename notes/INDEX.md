@@ -70,5 +70,6 @@ MEMORY.md/USER.md 索引行的 `→ notes/<file>.md` 指针在此注册。**技�
 | dsh 实例更新 | 2026-09-03 | agent | active | 归档裁决新增 |
 | 记忆体系分工 | 2026-09-03 | agent | active | 归档裁决新增 |
 | 插件生产线 | 2026-09-03 | agent | active | 归档裁决新增 |
+| 治理漂移根因 | 2026-09-04 | agent | active | 治理体检固化 |
 
 > 维护规则：新增条目→表加一行（创建/溯源）；小节内容更新→同步更新"备注"或 CHANGELOG；条目指针化/删除→状态改 archived/removed 而非物理删除（历史留痕）。
