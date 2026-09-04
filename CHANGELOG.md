@@ -15,6 +15,7 @@
 - 召回增强：JSONL 转录行提取对话正文匹配（extractUtterance），session/title·todo/write 等结构化状态行降噪不入召回；信号更准（todo 计划性内容不再误命中）。
 
 ### Fixed
+- 治理体检（2026-09-04）：ADR-0002 v1（proposed/人工终审）与已落地的全自动闭环矛盾 → 追平为 v2（accepted/无人工环，含 v1→v2 拍板修订记录，阈值按实际 5 条/5min/merge≥6 修正）；decisions/README 索引同步；用例计数漂移修正（root/tree scripts 13/22→23，实测 23 PASS）。
 - 测试健壮性：方案 B 状态机断言改按 sessionId 取数（此前按数组位置，容器 log 含真实会话条目时错位——生产副本 16/2 假阴性根因）；双侧 18/18 复绿。
 - 治理完整性修复：index.md CHANGELOG 死链（`../`→`../../`，pre-commit 门禁自锁解除）、补齐 root/audit-notes-pending 三模块文档与 index 导航概况/root 派生表语义字段、tree 职责注记补全。
 - 治理补全：facts.md 模板部署 + AGENTS/CLAUDE 规则 0（用户事实铁律）、relatedness 规则开启（warn）、scripts→pending 关联补记。

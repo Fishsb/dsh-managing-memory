@@ -9,5 +9,5 @@
 | `audit` | 审计报告归档+归档进度数据区（非记忆）:health 报告归档 / archive-progress.jsonl（归档检测增量进度）/ access.log（notes 检索命中统计） | `scripts` |
 | `notes` | 记忆详情七类+INDEX 注册表（索引指针目标）:env/tools/flows/lessons/release/user/agent 详情 + INDEX.md；小节名=内容锚（read_section 按锚定位） | `scripts` |
 | `pending` | 候选暂存区（ADD-only）:会话收尾/审计产出的「值得记」候选先落此处，经四问评估后固化入册或删除 | `audit`、`scripts` |
-| `scripts` | 归档检测+记忆工具引擎（单一事实源）:archive-lib 公共层（env 隔离）/ archive-check（增量+召回+--json）/ archive-mark（进度+touch）/ archive-timer（方案 B 定时唤醒+pending 队列）+ health/write_gate/read_section/session_grep/candidate_grep；vendor/fzstd 零依赖解码 | `notes`、`pending` |
+| `scripts` | 归档检测+记忆工具引擎（单一事实源）:archive-lib 公共层（env 隔离）/ archive-check（增量+召回+--json）/ archive-mark（进度+touch）/ archive-timer（方案 B 定时唤醒+pending 队列）+ health/write_gate/read_section/session_grep/candidate_grep；vendor/fzstd 零依赖解码 | `notes`、`audit`、`pending` |
 <!-- MODULE_TABLE_END -->
