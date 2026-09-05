@@ -5,6 +5,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **spawnSync 冻死主线程根治（2026-09-05，WorkBuddy 诊断 + 补丁同步 src）**：daemon tick 的 `spawnSync(archive-timer --due)` 同步阻塞主线程——会话树积累 348MB 后扫描 120s 跑不完 → 每 tick 冻结 web 服务 120s → 超时杀掉空 result → 循环冻死（日志铁证 `tick error: stdout 非 JSON |` 空输出；归档此前一直空转失败从未成功）。修：daemon-loop 改**异步 spawn**（主线程零等待）+ **在航守卫**（ticking 上一轮没跑完跳过本 tick）+ 超时放宽 10 分钟。验证：tick 窗口内请求冻结 25s+ → 2ms；archive-timer 首次真正跑完（完整 due/rearm 记录）。补丁已同步 src/index.ts（消除重新 build 覆盖隐患），备份 lib/index.js.bak-pre-asyncfix-20260905。
+- **蒸馏子代理递归根治（2026-09-05，参考 dsh-mnemon 架构）**：spawn 的蒸馏子代理完成后自身转录落 sessions 树 → 被 --due 当静默会话再次蒸馏 → 无限递归（每 60s 一次 API 调用彻夜不停）。修（mnemon「child 永不 idle-review」架构）：① 引擎 `archive-lib.isSubagentSession()`（读转录 header origin=subagent/parentSession，兼容 zstd）② discover 步排除 subagent ③ `--pending-list` 过滤 subagent 队列项 ④ runDue 对「会动作」mark 拦截并清 mark 出网（subagent-clear，实测清 84 个）⑤ distillOne 仅 completed 才 done+dequeue（aborted 保留重试）。验证：递归 spawn 停止、pending 队列 0、84 个 subagent mark 清出网。
+- **F-001 idleWakeMs 未生效修复（2026-09-05）**：插件 config idleWakeMs（默认 600s=10min）此前未传引擎，实际静默判定用引擎缺省 780s=13min。修：daemon tick 异步 spawn 带 `env ARCHIVE_SILENT_MS=idleWakeMs` → 10 分钟唤醒判定真正生效。
+
+### Fixed
 - **用户确定事实登记（2026-09-05）**：F-001 蒸馏子代理唤醒判定=会话任务停止时长（可配置、非任务结束即唤醒）；F-002 蒸馏子代理模型可配置；UI 开发待办（唤醒空闲时长 + 蒸馏模型两配置项 UI）。登记于 docs/map/facts.md。
 - **深思考流式会话召回缺口（实测实证 2026-09-05）**：`archive-lib.mjs` 召回只命中 user/assistant 完整行，深思考会话正文被切成 `text-chunks` delta 增量行（dt/texts）与 `assistant/chunk`（block-end），结论（根因/对策等）对裁决 LLM 不可见 → 真知识被误 SKIP。修：`extractUtterance` 展开 `assistant/chunk` block.text 与 `assistant/message` content；新增 `decodeTextChunksDelta` 跨行累积还原流式正文，`recallSignals` 命中含 SIG 的 delta 结论窗口。实测：386 行复盘会话 signals 1→8（知识结论行全命中）；dev+prod 双份同步。
 - **方案 C 自动闭环卡死根治（插件 lib/src v2，2026-09-04 审查实证）**：① 裁决触发死锁——tick 仅当 pending≥5 才裁决，3 条队列永不处理 → 改队列非空+冷却即裁决（冷却/batch 内控）；② 固化触发死锁——候选≥6 才固化，4 候选永不处理 → 改候选存在+1h 冷却即固化（宁缺毋滥归固化 LLM+memory-append 安全阀，mergeThreshold 降为提示）；③ LLM 路由传染——捕获宿主 llm/stream 路由永久钉死，故障模型 3 连空响应停摆 → 路由候选链 config>env>宿主捕获，捕获路由连续失败 ≥2 自动弃用、随宿主 llm/stream 刷新重捕获重试；④ 日期硬编码 `2026-09-04-arb-` → 运行时 `new Date()` + 通用前缀正则 `^\d{4}-\d{2}-\d{2}-arb-`（跨天不死，历史候选可收集）；⑤ src/index.ts 与 lib 同步（此前 lib 08:33 > src 02:10 且注释 v1「人工终审」残留）；⑥ SKILL §10 裁决节方案 B「fork 子代理」→ 方案 C 全自动语义（生产副本+本仓源同步）。

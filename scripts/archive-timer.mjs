@@ -50,6 +50,18 @@ async function runDue(batchOverride) {
   for (const m of marks) {
     const sid = m.sessionId;
 
+    // ── subagent 会话拦截（mnemon 架构：child 永不 idle-review，防递归）──
+    // 仅对「会动作」的 mark 检查（fireAt 武装中 / pending 队列中）；已清理态(fireAt=null非pending)不查，控制扫描成本
+    if (m.fireAt != null || m.pending) {
+      const tfile0 = await lib.locateTranscript(sid);
+      if (tfile0 && await lib.isSubagentSession(tfile0)) {
+        await lib.removePending(sid, cfg.pendingDir);
+        await lib.upsertMark({ ...m, done: true, pending: false, fireAt: null, at: new Date().toISOString() });
+        fired.push({ sid, action: 'subagent-clear', reason: 'subagent 会话（origin=subagent）→ 清 mark 出网（防递归蒸馏）' });
+        continue;
+      }
+    }
+
     // ── 数据驱动重武装：fireAt=null（已被清理）+ 已静默 + 转录 size 变化（新行/继续）→ 重新武装（重启重计时兜底）──
     if (m.fireAt == null && !m.pending) {
       const tfile = await lib.locateTranscript(sid);
@@ -179,7 +191,14 @@ if (mode === 'deq') {
 if (mode === 'plist') {
   const files = await lib.listPending(cfg.pendingDir);
   const rows = [];
-  for (const f of files) { try { rows.push(JSON.parse(await readFile(join(cfg.pendingDir, f), 'utf8'))); } catch { /* 坏行跳过 */ } }
+  for (const f of files) {
+    try {
+      const r = JSON.parse(await readFile(join(cfg.pendingDir, f), 'utf8'));
+      // 过滤 subagent 会话（origin=subagent 的蒸馏/任务子代理——非用户会话，蒸馏无意义且防递归）
+      if (r && r.transcript && await lib.isSubagentSession(r.transcript)) continue;
+      rows.push(r);
+    } catch { /* 坏行跳过 */ }
+  }
   if (wantJson) console.log(JSON.stringify(rows, null, 2));
   else {
     console.log(`pending 队列 ${rows.length} 条：`);

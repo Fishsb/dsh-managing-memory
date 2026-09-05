@@ -168,6 +168,14 @@ export function recallSignals(lines, from /* 1-based 首条新行 */, limit = 8)
 
 // ---- 会话发现（补「无 mark 会话脱管」缺口）：枚举会话树，静默超阈值且无 mark 的纳入 ----
 // 返回 {sessionId, file, mtime}；mtime<=cutoff 且无 mark 才交给 timer（新建 mark 或直接处理由调用方定）
+// 排除 subagent 会话（origin=subagent，如蒸馏子代理/任务子代理——非用户会话，蒸馏无意义且防递归）
+export async function isSubagentSession(file) {
+  try {
+    const text = await decodeTranscript(file); // 兼容 zstd/明文
+    const first = text.split('\n').find(Boolean) || '';
+    return first.includes('"origin":"subagent"') || first.includes('"parentSession"');
+  } catch { return false; }
+}
 export async function enumerateSessions(cutoffMs, marks) {
   const root = pathConfig().sessionsRoot;
   const known = new Set((marks || []).map((m) => normalizeSid(m.sessionId || '')));
@@ -184,7 +192,11 @@ export async function enumerateSessions(cutoffMs, marks) {
         const sid = e.name.replace(/^session-/, '');
         if (!known.has(sid)) {
           const mt = idx.mtimeMs;
-          if (mt <= cutoffMs) out.push({ sessionId: sid, file: join(full, fname), mtime: mt });
+          if (mt <= cutoffMs) {
+            const file = join(full, fname);
+            if (await isSubagentSession(file)) continue; // 跳过蒸馏/任务子代理会话
+            out.push({ sessionId: sid, file, mtime: mt });
+          }
         }
       }
       await walk(full);
