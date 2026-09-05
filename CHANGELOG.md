@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **用户确定事实登记（2026-09-05）**：F-001 蒸馏子代理唤醒判定=会话任务停止时长（可配置、非任务结束即唤醒）；F-002 蒸馏子代理模型可配置；UI 开发待办（唤醒空闲时长 + 蒸馏模型两配置项 UI）。登记于 docs/map/facts.md。
+- **深思考流式会话召回缺口（实测实证 2026-09-05）**：`archive-lib.mjs` 召回只命中 user/assistant 完整行，深思考会话正文被切成 `text-chunks` delta 增量行（dt/texts）与 `assistant/chunk`（block-end），结论（根因/对策等）对裁决 LLM 不可见 → 真知识被误 SKIP。修：`extractUtterance` 展开 `assistant/chunk` block.text 与 `assistant/message` content；新增 `decodeTextChunksDelta` 跨行累积还原流式正文，`recallSignals` 命中含 SIG 的 delta 结论窗口。实测：386 行复盘会话 signals 1→8（知识结论行全命中）；dev+prod 双份同步。
+- **方案 C 自动闭环卡死根治（插件 lib/src v2，2026-09-04 审查实证）**：① 裁决触发死锁——tick 仅当 pending≥5 才裁决，3 条队列永不处理 → 改队列非空+冷却即裁决（冷却/batch 内控）；② 固化触发死锁——候选≥6 才固化，4 候选永不处理 → 改候选存在+1h 冷却即固化（宁缺毋滥归固化 LLM+memory-append 安全阀，mergeThreshold 降为提示）；③ LLM 路由传染——捕获宿主 llm/stream 路由永久钉死，故障模型 3 连空响应停摆 → 路由候选链 config>env>宿主捕获，捕获路由连续失败 ≥2 自动弃用、随宿主 llm/stream 刷新重捕获重试；④ 日期硬编码 `2026-09-04-arb-` → 运行时 `new Date()` + 通用前缀正则 `^\d{4}-\d{2}-\d{2}-arb-`（跨天不死，历史候选可收集）；⑤ src/index.ts 与 lib 同步（此前 lib 08:33 > src 02:10 且注释 v1「人工终审」残留）；⑥ SKILL §10 裁决节方案 B「fork 子代理」→ 方案 C 全自动语义（生产副本+本仓源同步）。
+
 ### Added
+- **方案 D：spawn 蒸馏子代理单通道（ADR-0003，2026-09-05 落地+E2E）**：蒸馏固化收敛单一自动通道——daemon `--due` 发现静默会话（唤醒判定=任务停止满 idleWakeMs，F-001 默认 10min）→ `ctx.subagents.start('spawn')` 蒸馏子代理（feed 转录信号+pending 候选，借活 agent 宿主，跳过 origin=subagent 防递归）→ 子代理四问裁决+查重 → 输出结构化 JSON → 宿主 memory-append 安全阀入册 → completed 才 done+dequeue。模型 agentOptions 空=继承主会话 / config 可指定（F-002，需真实 adapter 名）。替代方案 C daemon 内 LLM 直裁（ADR-0002 v2 被 ADR-0003 取代）；E2E 实测：新知识正确入册 notes+MEMORY 索引（含写前备份）、重复知识 SKIP 查重、aborted 保留重试不丢内容。UI 配置待办：唤醒时长 + 蒸馏模型两配置项（facts.md 登记）。
 - 方案 C 全自动闭环（ADR-0002 v2，用户拍板无人工终审）：插件 daemon 自动 LLM 四问裁决（pending≥5/冷却 30min）→ SKIP 自动 mark done+dequeue、ADD 落候选 → 候选≥6 自动固化：LLM 结构化落点指令 + 新引擎 `memory-append`（安全阀=白名单/无锚拒写/主文档容量门禁/写前备份）→ **全自动入册，无人工环**；测试 22→23 全绿。
 - 容量分层重构：容量红线只对主文档（MEMORY 3000 / USER·AGENT 2000）；notes 等辅助文档解除硬限（>8000 仅提示）；health/gate/SKILL/spec v10 同步；容器净化修复 prod 测试 flakiness（cleanContainer + 溯源断言）。
 - 碎片治理（复盘结论 2 落地）：`--due` 内建**机械消化**——无信号且 <`ARCHIVE_MECH_NOOP_LINES`（缺省 500，0=关）的会话直接 done 不进裁决队列（消灭 82% 无谓裁决）；`--drain` **排空模式**——大 batch 循环捞历史静默未 mark 会话至无剩，一次性消化积压（终结「边清边长」）；测试 20→22 用例全绿（新增机械消化/排空正向用例；消除活跃保护 1ms 测试竞态——容器测试显式回拨 mtime）。

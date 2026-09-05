@@ -107,16 +107,61 @@ export function extractUtterance(line) {
       for (const k of TEXT_KEYS) if (k !== 'text' && v[k] != null) collect(v[k]);
     }
   };
+  // assistant/chunk 流式行：block-end 携带完整块正文（含推理结论），text-chunks/message 内嵌正文也可还原
+  if (type === 'assistant/chunk') {
+    const c = d?.chunk || d;
+    if (c?.block?.text) collect(c.block.text); // block-end / block text：完整正文
+    if (c?.text) collect(c.text); // 部分流：已组装的 text
+    if (d?.message?.content) collect(d.message.content); // 终态 message
+    return out.trim();
+  }
+  if (type === 'assistant/message' && d?.message?.content) {
+    collect(d.message.content);
+    return out.trim();
+  }
   collect(d.content ?? d.texts ?? d.text ?? '');
   return out.trim();
 }
+// text-chunks delta 累积解码（深思考/流式正文还原）：转录把正文切成 delta 增量行（dt=步长,texts=增量token）。
+// 逐行累积 texts 即可还原可读正文（append-only patch）。供 recallSignals 跨行还原，命中含「根因/对策」等结论行。
+export function decodeTextChunksDelta(lines, fromIdx /* 0-based */) {
+  let acc = '';
+  const chunks = [];
+  for (let i = fromIdx; i < lines.length; i++) {
+    let o = null;
+    try { o = JSON.parse(lines[i]); } catch { break; }
+    if (o?.type === 'text-chunks' && Array.isArray(o?.data?.texts)) {
+      // 简化：texts 是相对上一行的增量新增 token，直接拼接可还原正文（实测全量累加即原文）
+      acc += o.data.texts.join('');
+      chunks.push({ row: i + 1, text: acc });
+    } else if (o?.type === 'assistant/chunk' && o?.data?.chunk?.block?.text) {
+      acc += o.data.chunk.block.text;
+      chunks.push({ row: i + 1, text: acc });
+    } else if (o?.type === 'assistant/message' && o?.data?.message?.content) {
+      const t = JSON.stringify(o.data.message.content);
+      acc += t.replace(/\\n/g, '\n').replace(/[{"}\[\]]/g, ' ');
+      chunks.push({ row: i + 1, text: acc });
+    }
+    if (acc.length > 60000) break; // 防御：单会话正文上限
+  }
+  return chunks;
+}
 export function recallSignals(lines, from /* 1-based 首条新行 */, limit = 8) {
   const hits = [];
+  // 预扫描 text-chunks 流式结论（还原后按行号归并，供下循环命中 SIG）
+  const deltaChunks = decodeTextChunksDelta(lines, Math.max(0, from - 1));
   for (let i = from - 1; i < lines.length; i++) {
     const utter = extractUtterance(lines[i]);
     if (!utter) continue; // JSON 元数据/无正文行：跳过（噪音不入召回）
     const s = utter.replace(/\s+/g, ' ').slice(0, 130);
     if (SIG_RE.test(s) && s.length > 6) hits.push({ row: i + 1, text: s });
+  }
+  // delta 结论行（原文含根因/对策等）若未被上面的逐行命中，则从累积片段取含 SIG 的窗口
+  for (const c of deltaChunks) {
+    const already = hits.some((h) => h.row === c.row);
+    if (already) continue;
+    const seg = c.text.slice(-160).replace(/\s+/g, ' ');
+    if (SIG_RE.test(seg) && seg.length > 6) hits.push({ row: c.row, text: '…' + seg.slice(-130) });
   }
   return hits.slice(0, limit);
 }
