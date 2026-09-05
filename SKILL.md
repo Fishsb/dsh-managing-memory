@@ -82,14 +82,14 @@ Research & Execution Agent：检索、分析、诊断、建议、交付；代码
 
 **完整性自检与恢复**：health 覆盖缺失(4)/重复(3)/指针·格式(5)/超限(2)；异常→按重组 7 步修复，局部损坏用 `dist\`/CHANGELOG 复原，无法自愈保留现场如实上报（零容忍）。
 
-### 10. 会话归档检测（方案 B 唤醒 + 方案 D 蒸馏，ADR-0001/ADR-0003）
+### 10. 会话归档检测（方案 E：事件驱动蒸馏，ADR-0004；引擎 CLI 兜底）
 
-- **触发 = 定时唤醒**（每会话独立 idle 计时器）：每轮 turn 后 `node scripts\archive-mark.mjs <sessionId> --touch`（重计时，可选优化——**mtime 活跃保护兜底**：fireAt 到点但转录仍在更新 → 引擎自动 rearm，忘 touch 的活跃会话不误触发）；到点由**宿主常驻执行者**唤醒——daemon-loop 插件每 tick 跑 `archive-timer --due`，无插件环境可 `--watch [ms]` 常驻或手动 `--due`（O(1) 扫描，非每会话 Timer）
-- **唤醒语义**：fireAt 到点 → `--due`：资格门控（行数≥50，`ARCHIVE_MIN_LINES` 可调）→ 机械信号召回 → 落 `audit\archive-pending\<sid>.json` 队列 → pending=true/fireAt=null（**唤醒后清理**）；静默阈值 = 蒸馏唤醒判定 `idleWakeMs`（F-001，插件 config，默认 600s=10 分钟，`ARCHIVE_SILENT_MS` 引擎侧可调）
-- **状态与幂等**：mark 行 `{sessionId,lastRow,total,done,pending,lastTurnAt,fireAt,lastSize,at}`；已入队不重触发；done+新行/fireAt=null+静默+size 变化 → 数据驱动重武装；`archive-timer --status [--json]` 看全景
-- **蒸馏执行（方案 D：spawn 蒸馏子代理，ADR-0003，2026-09-05 起替代方案 C 直裁）**：daemon tick 检测 pending 队列非空（会话已静默满 idleWakeMs）→ `ctx.subagents.start('spawn', ...)` 蒸馏子代理（不继承父上下文，feed 转录机械信号 + pending/ 候选；借任一活 agent 作执行宿主；**跳过 origin=subagent 会话防递归**）→ 子代理四问裁决+查重 → 输出结构化 JSON `{appends,newIndex,skipped}` → **宿主执行** `memory-append` 安全阀入册（白名单/无锚拒写/容量门禁/写前备份）→ completed 才 `archive-mark --done` + `--dequeue`（aborted/error 保留重试）。模型：agentOptions 空=继承主会话（F-002）；可 config 指定 llmProvider/llmModel（需真实 adapter 名如 deepseek-official）。每动作写插件自日志 `~\.dsh\super-injector\dsh-managing-memory.log`
-- **人工介入入口（可选，非必需）**：`archive-timer --pending-list` 取队列 → `archive-check <sid> --json --sig` 增量+信号 → 四裁决（ADD 新候选→`pending\` / NOOP 重复跳过 / MERGE 并入同主题 / SUPERSEDE 备注丢弃）→ `archive-mark <sid> <lastRow> --done` → `archive-timer --dequeue <sid>` 清队
-- **存储约束**：进度与队列在 `audit\`（非记忆、health 不扫、不计容量）；候选只落 `pending\`；**绝不直接写 MEMORY/USER/AGENT/notes**（写入一律经引擎 memory-append 安全阀）；env（`ARCHIVE_LOG/PENDING/SESSIONS/SILENT_MS`）仅供插件与测试容器隔离
+- **触发 = session/event 事件驱动（方案 E，ADR-0004，2026-09-05 起为主链路）**：插件 watcher 监听 `turn/end`（completed）→ root agent（`header.origin!=='subagent'`）→ 重置该会话 idle 定时器（`idleWakeMs`，F-001 默认 10min）→ **到点且 agent 仍 idle → 自动蒸馏**（内存增量 snapshotEvents 水位读取，零扫描零解压）→ spawn 蒸馏子代理（10min 超时）→ 结构化 JSON → 引擎 `memory-append` 安全阀入册 → 水位推进（`audit/distill-watermark.jsonl`）。agent/disposed 自动清 timer；重启 roots() adopt 恢复。蒸馏子代理会话（origin=subagent）天然不触发（无扫描器，无递归）。
+- **引擎 CLI 兜底（无插件环境/冷会话手动）**：`archive-timer --due`（发现静默会话→机械召回→落 `audit\archive-pending\<sid>.json` 队列）、`--drain`（排空积压）、`--pending-list`/`--dequeue`（队列管理）、`--status`（全景）；`archive-check <sid> --json --sig`（增量+信号）；`archive-mark <sid> --touch`（活跃重计时）。轮询兜底链路不再被插件自动调用。
+- **蒸馏入册协议（不变）**：宁缺毋滥四问；`memory-append` 安全阀（白名单小节/无锚拒写/容量门禁/写前备份）是唯一写入口；候选 `pending\<日期>-arb-*.md` 兼容会话内收尾链落盘；成功归档 `.processed\`。
+- **模型（F-002）**：蒸馏子代理 agentOptions 空=继承主会话当前模型；config `llmProvider/llmModel` 可指定（需真实 adapter 名如 `deepseek-official`；启动时 listProviders 校验告警）。
+- **存储约束**：蒸馏水位 `audit\distill-watermark.jsonl`（插件方案 E）；mark/队列在 `audit\`（引擎兜底链路，非记忆、health 不扫、不计容量）；候选只落 `pending\`；**绝不直接写 MEMORY/USER/AGENT/notes**（写入一律经 memory-append 安全阀）。
+- **人工介入入口（可选）**：`archive-timer --pending-list` 取队列 → `archive-check <sid>` → 四裁决（ADD/NOOP/MERGE/SUPERSEDE）→ `archive-mark --done` → `--dequeue` 清队；或直接编辑 pending 候选。
 
 ## 🧠 L3 速查（按需查阅）
 
